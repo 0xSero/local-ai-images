@@ -159,6 +159,10 @@ def main():
         check("messages: streamed stop_reason tool_use", any(e["type"] == "message_delta" and e["delta"]["stop_reason"] == "tool_use" for e in events), str(events))
 
         # OpenAI Responses, non-streaming
+        status, body = call("/v1/messages", {"model": "claude-x", "max_tokens": 64, "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"name": "edit", "description": "", "input_schema": {"type": "object", "properties": {"path": {"type": "string", "pattern": "^[A-Za-z0-9_\\-.]+$", "format": "uri"}}, "required": ["path"]}}]})
+        params = FakeEngine.last_request["tools"][0]["function"]["parameters"]
+        check("tools: pattern and format are scrubbed from parameter schemas", "pattern" not in params["properties"]["path"] and "format" not in params["properties"]["path"] and params["required"] == ["path"], str(params))
         status, body = call("/v1/responses", {"model": "gpt-x", "instructions": "be brief", "input": "hi"})
         check("responses: text output", status == 200 and body["object"] == "response" and body["status"] == "completed" and body["output"][0]["content"][0]["text"] == "Hello from the engine", str(body))
         rtools = [{"type": "function", "name": "shell", "description": "run", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}]

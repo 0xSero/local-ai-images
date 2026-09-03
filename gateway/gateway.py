@@ -99,6 +99,17 @@ def upstream_model(requested):
     return MODEL_ALIAS or requested
 
 
+def scrub_schema(schema):
+    """Tool parameter schemas as the engine can take them. llama.cpp compiles them to a grammar and rejects
+    regex escapes it does not know (Claude Code ships a pattern with \\- ); `pattern` and `format` are
+    validation hints the model does not need to call the tool, so they are dropped at every depth."""
+    if isinstance(schema, dict):
+        return {k: scrub_schema(v) for k, v in schema.items() if k not in ("pattern", "format")}
+    if isinstance(schema, list):
+        return [scrub_schema(v) for v in schema]
+    return schema
+
+
 def hoist_system(messages):
     """One leading system message. Chat templates such as Qwen's refuse a system message anywhere
     else, and clients send them mid-conversation (Codex developer items, Claude's per-turn system)."""
@@ -159,7 +170,7 @@ def anthropic_to_chat(req):
     tools = req.get("tools") or []
     if tools:
         out["tools"] = [{"type": "function", "function": {"name": t.get("name"), "description": t.get("description", ""),
-                                                          "parameters": t.get("input_schema") or {"type": "object", "properties": {}}}}
+                                                          "parameters": scrub_schema(t.get("input_schema") or {"type": "object", "properties": {}})}}
                         for t in tools if t.get("name")]
         choice = req.get("tool_choice") or {}
         kind = choice.get("type")
@@ -296,7 +307,7 @@ def responses_to_chat(req):
     tools = [t for t in req.get("tools") or [] if t.get("type") == "function"]
     if tools:
         out["tools"] = [{"type": "function", "function": {"name": t.get("name"), "description": t.get("description") or "",
-                                                          "parameters": t.get("parameters") or {"type": "object", "properties": {}}}} for t in tools]
+                                                          "parameters": scrub_schema(t.get("parameters") or {"type": "object", "properties": {}})}} for t in tools]
         choice = req.get("tool_choice")
         if isinstance(choice, dict) and choice.get("type") == "function":
             out["tool_choice"] = {"type": "function", "function": {"name": choice.get("name")}}
@@ -474,6 +485,8 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/v1/chat/completions", "/chat/completions"):
                 if isinstance(body.get("messages"), list):
                     body["messages"] = hoist_system(body["messages"])
+                if isinstance(body.get("tools"), list):
+                    body["tools"] = scrub_schema(body["tools"])
                 if MODEL_ALIAS:
                     body["model"] = MODEL_ALIAS
                 return self.passthrough("POST", "/v1/chat/completions", body)
