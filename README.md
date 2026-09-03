@@ -10,6 +10,7 @@ attestation:
 
 | Image | Base | Why it exists |
 |---|---|---|
+| `gateway` | `python:3.12-slim` by digest | the plugin's one endpoint: OpenAI chat passes through, Anthropic Messages and OpenAI Responses are translated to the engine's chat completions, streaming and tool calls included; enforces the share key when one is set. `python3 gateway/test.py` runs its tests against a fake engine. |
 | `tabbyapi-exl3` | `ghcr.io/theroyallab/tabbyapi:cu13` by digest | adds `python3-dev` and `build-essential`; without Python headers Triton cannot JIT ExLlamaV3's gated-delta-net kernels, so Qwen3.5 and Qwen3.8 fail to load |
 
 Recipes reference the digest the workflow prints, never a tag. To publish:
