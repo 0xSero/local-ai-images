@@ -162,6 +162,13 @@ def main():
         status, body = call("/v1/responses", {"model": "gpt-x", "instructions": "be brief", "input": "hi"})
         check("responses: text output", status == 200 and body["object"] == "response" and body["status"] == "completed" and body["output"][0]["content"][0]["text"] == "Hello from the engine", str(body))
         rtools = [{"type": "function", "name": "shell", "description": "run", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}]
+        status, body = call("/v1/responses", {"model": "gpt-x", "instructions": "be brief",
+            "input": [{"type": "message", "role": "user", "content": "hi"}, {"type": "message", "role": "developer", "content": "answer in French"}]})
+        sys_msgs = [m for m in FakeEngine.last_request["messages"] if m["role"] == "system"]
+        check("responses: every system/developer message is hoisted into one leading system message",
+              len(sys_msgs) == 1 and FakeEngine.last_request["messages"][0]["role"] == "system" and "French" in sys_msgs[0]["content"], str(FakeEngine.last_request["messages"]))
+        status, body = call("/v1/chat/completions", {"model": "anything", "messages": [{"role": "user", "content": "hi"}, {"role": "system", "content": "late system"}]})
+        check("chat: a mid-list system message is hoisted to the front", FakeEngine.last_request["messages"][0] == {"role": "system", "content": "late system"}, str(FakeEngine.last_request["messages"]))
         status, body = call("/v1/responses", {"model": "gpt-x", "tools": rtools, "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "please use the tool"}]}]})
         fc = [o for o in body["output"] if o["type"] == "function_call"]
         check("responses: function_call item", status == 200 and fc and fc[0]["name"] == "shell" and json.loads(fc[0]["arguments"]) == {"command": "echo hi"}, str(body))

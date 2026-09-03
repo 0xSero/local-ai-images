@@ -99,6 +99,16 @@ def upstream_model(requested):
     return MODEL_ALIAS or requested
 
 
+def hoist_system(messages):
+    """One leading system message. Chat templates such as Qwen's refuse a system message anywhere
+    else, and clients send them mid-conversation (Codex developer items, Claude's per-turn system)."""
+    system = [m.get("content") or "" for m in messages if m.get("role") == "system"]
+    rest = [m for m in messages if m.get("role") != "system"]
+    if not system:
+        return rest
+    return [{"role": "system", "content": "\n\n".join(c for c in system if c)}] + rest
+
+
 # ----------------------------------------------------------------------------- Anthropic Messages -> chat
 def anthropic_to_chat(req):
     messages = []
@@ -138,7 +148,7 @@ def anthropic_to_chat(req):
                 messages.extend(tool_results)
             if text_parts:
                 messages.append({"role": "user", "content": "\n".join(text_parts)})
-    out = {"model": upstream_model(req.get("model")), "messages": messages, "stream": bool(req.get("stream"))}
+    out = {"model": upstream_model(req.get("model")), "messages": hoist_system(messages), "stream": bool(req.get("stream"))}
     if req.get("max_tokens"):
         out["max_tokens"] = req["max_tokens"]
     for key in ("temperature", "top_p"):
@@ -277,7 +287,7 @@ def responses_to_chat(req):
             messages.append({"role": "tool", "tool_call_id": item.get("call_id"), "content": output if isinstance(output, str) else json.dumps(output)})
         elif kind == "reasoning":
             continue
-    out = {"model": upstream_model(req.get("model")), "messages": messages, "stream": bool(req.get("stream"))}
+    out = {"model": upstream_model(req.get("model")), "messages": hoist_system(messages), "stream": bool(req.get("stream"))}
     if req.get("max_output_tokens"):
         out["max_tokens"] = req["max_output_tokens"]
     for key in ("temperature", "top_p"):
@@ -462,6 +472,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(400, {"error": {"type": "invalid_request_error", "message": "body is not JSON"}})
         try:
             if path in ("/v1/chat/completions", "/chat/completions"):
+                if isinstance(body.get("messages"), list):
+                    body["messages"] = hoist_system(body["messages"])
                 if MODEL_ALIAS:
                     body["model"] = MODEL_ALIAS
                 return self.passthrough("POST", "/v1/chat/completions", body)
