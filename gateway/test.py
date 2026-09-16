@@ -204,6 +204,30 @@ def main():
         status, events = call("/v1/responses", {"model": "gpt-x", "stream": True, "tools": rtools, "input": "please use the tool"}, stream=True)
         done = [e for e in events if e["type"] == "response.function_call_arguments.done"]
         check("responses: streamed function call", done and json.loads(done[0]["arguments"]) == {"command": "echo hi"} and events[-1]["response"]["output"][0]["type"] == "function_call", str(events))
+        # Image bytes must survive both dialects, including Read tool results.
+        image_url = "data:image/png;base64,aW1hZ2U="
+        aimage = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "aW1hZ2U="}}
+        expected = [{"type": "text", "text": "describe"}, {"type": "image_url", "image_url": {"url": image_url}}]
+        for stream in (False, True):
+            status, _ = call("/v1/messages", {"model": "test", "max_tokens": 64, "stream": stream,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "describe"}, aimage]}]}, stream=stream)
+            check(f"messages: image reaches engine (stream={stream})", status == 200 and FakeEngine.last_request["messages"][0]["content"] == expected)
+            status, _ = call("/v1/responses", {"model": "test", "stream": stream,
+                "input": [{"role": "user", "content": [{"type": "input_text", "text": "describe"}, {"type": "input_image", "image_url": image_url}]}]}, stream=stream)
+            check(f"responses: image reaches engine (stream={stream})", status == 200 and FakeEngine.last_request["messages"][0]["content"] == expected)
+        status, _ = call("/v1/messages", {"model": "test", "messages": [
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "read_image", "name": "read", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "read_image", "content": [aimage]}]}]})
+        messages = FakeEngine.last_request["messages"]
+        check("messages: Read image survives tool result", status == 200 and messages[-2]["role"] == "tool" and messages[-2]["tool_call_id"] == "read_image" and messages[-1]["content"] == expected[1:])
+        for path, body in [
+            ("/v1/messages", {"messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "url", "url": "https://example.com/image.png"}}]}]}),
+            ("/v1/responses", {"input": [{"role": "user", "content": [{"type": "input_image", "image_url": "https://example.com/image.png", "detail": "low"}]}]})]:
+            status, _ = call(path, dict(body, model="test"))
+            image = FakeEngine.last_request["messages"][0]["content"][0]["image_url"]
+            check(f"{path}: image URL preserved", status == 200 and image["url"] == "https://example.com/image.png" and (path.endswith("messages") or image["detail"] == "low"))
+        status, body = call("/v1/responses", {"model": "test", "input": [{"role": "user", "content": [{"type": "input_image", "file_id": "unavailable"}]}]})
+        check("unsupported image reference fails explicitly", status == 400 and body["error"]["type"] == "invalid_request_error")
         print(f"# {passed} passed")
     finally:
         gateway.terminate()

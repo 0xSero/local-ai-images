@@ -120,6 +120,29 @@ def hoist_system(messages):
     return [{"role": "system", "content": "\n\n".join(c for c in system if c)}] + rest
 
 
+def chat_content(content):
+    """Preserve image inputs when translating Messages or Responses to Chat."""
+    if not isinstance(content, list):
+        return content
+    parts = []
+    for block in content:
+        kind = block.get("type")
+        if kind in ("text", "input_text", "output_text"):
+            parts.append({"type": "text", "text": block.get("text", "")})
+        elif kind in ("image", "input_image"):
+            source = block.get("source") or {}
+            url = block.get("image_url") or source.get("url")
+            if source.get("type") == "base64":
+                url = f"data:{source['media_type']};base64,{source['data']}"
+            if not url:
+                raise ValueError("image input requires a URL or base64 data")
+            image = {"url": url}
+            if block.get("detail"):
+                image["detail"] = block["detail"]
+            parts.append({"type": "image_url", "image_url": image})
+    return parts if any(p["type"] == "image_url" for p in parts) else "\n".join(p["text"] for p in parts)
+
+
 # ----------------------------------------------------------------------------- Anthropic Messages -> chat
 def anthropic_to_chat(req):
     messages = []
@@ -134,31 +157,32 @@ def anthropic_to_chat(req):
         if isinstance(content, str):
             messages.append({"role": role, "content": content})
             continue
-        text_parts, tool_calls, tool_results = [], [], []
+        parts, tool_calls, tool_results = [], [], []
         for block in content or []:
             kind = block.get("type")
-            if kind == "text":
-                text_parts.append(block.get("text", ""))
+            if kind in ("text", "image"):
+                parts.append(block)
             elif kind == "tool_use":
                 tool_calls.append({"id": block.get("id"), "type": "function",
                                    "function": {"name": block.get("name"), "arguments": json.dumps(block.get("input") or {})}})
             elif kind == "tool_result":
                 inner = block.get("content")
                 if isinstance(inner, list):
-                    inner = "\n".join(b.get("text", "") for b in inner if isinstance(b, dict) and b.get("type") == "text")
+                    # Chat tool results are text; images returned by Read become
+                    # user image blocks after the corresponding tool results.
+                    parts.extend(b for b in inner if b.get("type") == "image")
+                    inner = chat_content([b for b in inner if b.get("type") != "image"])
                 tool_results.append({"role": "tool", "tool_call_id": block.get("tool_use_id"), "content": inner if isinstance(inner, str) else json.dumps(inner)})
-            elif kind == "image":
-                text_parts.append("[image omitted]")
         if role == "assistant":
-            entry = {"role": "assistant", "content": "\n".join(text_parts) if text_parts else None}
+            entry = {"role": "assistant", "content": chat_content(parts) if parts else None}
             if tool_calls:
                 entry["tool_calls"] = tool_calls
             messages.append(entry)
         else:
             if tool_results:
                 messages.extend(tool_results)
-            if text_parts:
-                messages.append({"role": "user", "content": "\n".join(text_parts)})
+            if parts:
+                messages.append({"role": "user", "content": chat_content(parts)})
     out = {"model": upstream_model(req.get("model")), "messages": hoist_system(messages), "stream": bool(req.get("stream"))}
     if req.get("max_tokens"):
         out["max_tokens"] = req["max_tokens"]
@@ -281,8 +305,7 @@ def responses_to_chat(req):
         if kind == "message":
             role = item.get("role", "user")
             content = item.get("content")
-            if isinstance(content, list):
-                content = "\n".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") in ("input_text", "output_text", "text"))
+            content = chat_content(content)
             if role == "developer":
                 role = "system"
             messages.append({"role": role, "content": content or ""})
@@ -499,6 +522,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.handle_responses(body)
             if path in ("/v1/completions", "/completions"):
                 return self.passthrough("POST", "/v1/completions", body)
+        except ValueError as error:
+            return self.send_json(400, {"error": {"type": "invalid_request_error", "message": str(error)}})
         except (ConnectionError, OSError, http.client.HTTPException) as error:
             log(f"upstream error on {path}: {error}")
             return self.send_json(502, {"error": {"type": "api_error", "message": f"engine unavailable: {error}"}})
