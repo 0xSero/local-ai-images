@@ -42,6 +42,14 @@ class FakeEngine(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         req = json.loads(self.rfile.read(length))
         FakeEngine.last_request = req
+        if req.get("test_status") in (400, 429, 500):
+            body = json.dumps({"error": {"message": "Unsupported reasoning effort", "type": "BadRequestError"}}).encode()
+            self.send_response(req["test_status"])
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         last_user = next((m for m in reversed(req["messages"]) if m["role"] == "user"), {"content": ""})
         wants_tool = bool(req.get("tools")) and "use the tool" in str(last_user.get("content", ""))
         has_tool_result = any(m["role"] == "tool" for m in req["messages"])
@@ -131,6 +139,12 @@ def main():
         check("missing key is 401", status == 401, str(status))
         status, body = call("/v1/chat/completions", {"model": "anything", "messages": [{"role": "user", "content": "hi"}]})
         check("chat passthrough maps the model alias", status == 200 and FakeEngine.last_request["model"] == "fake-model", str(body))
+        for path in ("/v1/chat/completions", "/v1/completions"):
+            for expected in (400, 429, 500):
+                status, body = call(path, {"model": "anything", "stream": True, "test_status": expected,
+                                          "messages": [{"role": "user", "content": "hi"}]}, stream=True)
+                check(f"{path}: streaming preserves upstream {expected}",
+                      status == expected and body["error"]["message"] == "Unsupported reasoning effort", str(body))
 
         # Anthropic Messages, non-streaming
         status, body = call("/v1/messages", {"model": "claude-x", "max_tokens": 64, "system": "be brief", "messages": [{"role": "user", "content": "hi"}]})

@@ -506,7 +506,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def passthrough(self, method, path, body):
         up = Upstream(method, path, body)
-        if body and body.get("stream"):
+        if body and body.get("stream") and up.status == 200:
             self.start_sse()
             try:
                 # copy the engine's SSE bytes verbatim
