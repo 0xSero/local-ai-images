@@ -12,6 +12,7 @@ attestation:
 |---|---|---|
 | `gateway` | `python:3.12-slim` by digest | the plugin's one endpoint: OpenAI chat passes through, Anthropic Messages and OpenAI Responses are translated to the engine's chat completions, streaming and tool calls included; enforces the share key when one is set. `python3 gateway/test.py` runs its tests against a fake engine. |
 | `tabbyapi-exl3` | `ghcr.io/theroyallab/tabbyapi:cu13` by digest | adds `python3-dev` and `build-essential`; without Python headers Triton cannot JIT ExLlamaV3's gated-delta-net kernels, so Qwen3.5 and Qwen3.8 fail to load |
+| `llamacpp-prism` | `nvidia/cuda:12.8.1-runtime-ubuntu24.04` by digest | Prism ML's llama.cpp fork, whose ternary kernels are the only ones that load `Ternary-Bonsai-2-27B`'s `PTQ1_0`/`PQ2_0` packings; stock llama.cpp rejects them as unknown types. Ships the release tarball verified against its published `sha256`, a shim entrypoint that serves both the recipe argv and the campaign's SSH bootstrap, and `openssh-server` so the bootstrap does not need to install it |
 
 Recipes reference the digest the workflow prints, never a tag. To publish:
 run the workflow with the image directory and a tag, take the digest from the
