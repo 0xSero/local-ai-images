@@ -10,6 +10,10 @@ on:
         description: tag to publish alongside the digest
         required: true
         default: v1
+      sbom:
+        description: attach an SBOM; disable for images whose package tree exceeds the 40 MB attestation limit
+        required: false
+        default: "true"
 permissions:
   contents: read
   packages: write
@@ -40,7 +44,7 @@ jobs:
           push: true
           tags: ghcr.io/0xsero/${{ inputs.image }}:${{ inputs.tag }}
           provenance: mode=max
-          sbom: true
+          sbom: ${{ inputs.sbom == 'true' }}
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
