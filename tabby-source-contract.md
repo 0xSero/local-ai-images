@@ -31,11 +31,17 @@ on the exact source at rental (BenchmarkRepair/Opus).
 ## cu13 — deploy-tabbyapi-qwen38-4bpw-rtx-4090-24gb @ sha256:80f9e2befda50e4bb1c0ae6797a39f1cf285b54f2a519458095167bb0562bd65
 - Source-bundle artifact `tabby-source-deploy-tabbyapi-qwen38-4bpw-rtx-4090-24gb` (244 KB), run 35518118820 (SUCCESS), artifact id 10607921308.
 - tabby dist-info direct_url.json = `{"url":"file:///app"}` (local install, no git — same as cu12). exllamav3 = release wheel v1.5.0+cu132.torch2.11.0.
-- cu13 commit == 53da7919 from the 09-18 engine.json provenance (accepted by BenchmarkRepair).
+- cu13 commit LABELED 53da7919 by the 09-18 engine.json provenance (a provenance label, not a byte comparison).
 
-## Content-equivalence cu12 vs cu13 (closes cu12 commit-unconfirmed by CONTENT)
-All six TabbyAPI contract files are BYTE-IDENTICAL across cu12 (@47c4c6eb) and cu13 (@80f9e2be):
-errors.py=a5f6db04, endpoints/OAI/types/completion.py=b8b67229, sampling.py=f39e831f,
-config_models.py=49eb7b9f, tabby_config.py=98ed3b60, backends/exllamav3/model.py=2d9308a3.
-=> cu12 tabby source == cu13 tabby source == 53da7919 by content. Only difference is the exllamav3
-build (cu12 cu128.torch2.9.0 vs cu13 cu132.torch2.11.0; same exllamav3 release v1.5.0).
+## Contract-file byte scope (precise — SIX files only, NOT full repo / full commit identity)
+The SIX contract-relevant files are byte-identical across cu12 (@47c4c6eb), cu13 (@80f9e2be), AND upstream
+theroyallab/tabbyAPI @53da7919 — verified by sha256 of the actual installed bytes and of upstream content
+fetched at that ref (all six MATCH):
+  common/errors.py=a5f6db04, endpoints/OAI/types/completion.py=b8b67229, common/sampling.py=f39e831f,
+  common/config_models.py=49eb7b9f, common/tabby_config.py=98ed3b60, backends/exllamav3/model.py=2d9308a3.
+This scopes to the contract surface only. It does NOT establish that the cu12 (or cu13) full tree equals
+upstream 53da7919, and it does NOT recover cu12's commit: cu12 tabby is version 0.0.1, dist-info
+direct_url=file:///app, no VCS metadata => cu12 commit remains UNKNOWN. The contract is verified by the
+actual installed bytes bound to the image digests + the upstream byte match on those six files — that is
+sufficient; the commit stays truthfully unknown. exllamav3 differs by build only (cu12 v1.5.0+cu128.torch2.9.0
+vs cu13 v1.5.0+cu132.torch2.11.0; same release v1.5.0).
