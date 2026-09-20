@@ -38,6 +38,7 @@ model:
   template_vars_default:
     enable_thinking: true
   tool_format: qwen3_coder
+  # Flash-Next: 26.24 GB n-gram table in host RAM; routed experts split off-card.
   ngram_ram: true
   cpu_moe_split_experts: 128
 
