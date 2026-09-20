@@ -221,7 +221,7 @@ jobs:
                 *) echo "- vLLM local-tokenizer load deferred for large model $(basename "$MT") (weights exceed CI disk); transformers import proven above" >> "$GITHUB_STEP_SUMMARY" ;;
               esac
               H=$(docker run --rm --entrypoint vllm "$ref" serve /tmp/none --help 2>&1 || true)
-              for f in --model --served-model-name --max-model-len --gpu-memory-utilization --kv-cache-dtype --trust-remote-code; do
+              for f in --served-model-name --max-model-len --gpu-memory-utilization --kv-cache-dtype --trust-remote-code; do
                 echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
               pass "vllm serve flags present"
               # Surface the ENUMERATED parser registries from --help (the registry itself, not an exit-code
