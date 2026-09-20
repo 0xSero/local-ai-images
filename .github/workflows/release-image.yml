@@ -209,8 +209,17 @@ jobs:
                 exit 1
               fi ;;
             vllm)
-              docker run --rm --entrypoint python3 "$ref" -c "import huggingface_hub; print('hf_hub', huggingface_hub.__version__)"
-              pass "huggingface_hub import"
+              docker run --rm --entrypoint python3 "$ref" -c "import transformers, huggingface_hub; print('transformers', transformers.__version__, 'hf_hub', huggingface_hub.__version__)"
+              pass "transformers + huggingface_hub import (vLLM local-tokenizer path, Main: both engines local)"
+              # Local AutoTokenizer gate (BenchmarkRepair/Main) — identical to the SGLang path so the
+              # SGLang-vs-vLLM A/B builds ids the same way. Small models only (weights fit CI disk).
+              MT=$(docker inspect "$ref" --format '{{ index .Config.Labels "ai.omarchy.model.mount" }}')
+              case "$(basename "$MT")" in
+                MiniCPM5*|Ternary-Bonsai*)
+                  docker run --rm "$ref" python3 -c "from transformers import AutoTokenizer as A; import hashlib; t=A.from_pretrained('$MT', local_files_only=True, trust_remote_code=False); ct=getattr(t,'chat_template',None); d=t.apply_chat_template([{'role':'user','content':'hi'}], add_generation_prompt=True, tokenize=True, return_dict=True); ids=d['input_ids']; print('VLLM_TRC_FALSE_OK vocab_size='+str(getattr(t,'vocab_size','?'))+' chat_template_sha256='+(hashlib.sha256(ct.encode()).hexdigest() if ct else 'NONE')+' n_ids='+str(len(ids))+' first_ids='+str(list(ids[:6])))"
+                  pass "vLLM image: local AutoTokenizer loads (trust_remote_code=False) + apply_chat_template flat ids" ;;
+                *) echo "- vLLM local-tokenizer load deferred for large model $(basename "$MT") (weights exceed CI disk); transformers import proven above" >> "$GITHUB_STEP_SUMMARY" ;;
+              esac
               H=$(docker run --rm --entrypoint vllm "$ref" serve /tmp/none --help 2>&1 || true)
               for f in --model --served-model-name --max-model-len --gpu-memory-utilization --kv-cache-dtype --trust-remote-code; do
                 echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
