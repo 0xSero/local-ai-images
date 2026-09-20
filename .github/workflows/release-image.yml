@@ -187,12 +187,27 @@ jobs:
               for f in --model --served-model-name --max-model-len --gpu-memory-utilization --kv-cache-dtype --trust-remote-code; do
                 echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
               pass "vllm serve flags present"
-              echo "$H" | grep -iq minicpm5 && echo "- note: minicpm5 tool-parser IS in this vLLM build" >> "$GITHUB_STEP_SUMMARY" || echo "- note: minicpm5 tool-parser ABSENT (serve-only correct)" >> "$GITHUB_STEP_SUMMARY" ;;
+              # Authoritative argparse acceptance of the tool-capable parser flags (R18/R22/R29 bake these):
+              # `serve <flags> --help` exits 0 iff the choices are valid, errors "invalid choice" first if not.
+              if docker run --rm --entrypoint vllm "$ref" serve /tmp/none --max-model-len 40960 --enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3 --help >/tmp/vh 2>&1; then
+                pass "vllm argparse ACCEPTS --enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3"
+              else
+                echo "::error::vllm REJECTS the qwen3_xml/qwen3 parser flags:"; grep -iE 'invalid choice|error|usage' /tmp/vh | head -5; exit 1
+              fi
+              # EVIDENCE for R03/R06 tools=false: the exact complement of the SGLang check — does vLLM's
+              # own argparse REJECT --tool-call-parser minicpm5? exit!=0 + "invalid choice" == not registered.
+              if docker run --rm --entrypoint vllm "$ref" serve /tmp/none --max-model-len 1024 --tool-call-parser minicpm5 --help >/tmp/vm 2>&1; then
+                echo "- vLLM ACCEPTS --tool-call-parser minicpm5: R03/R06 could be tool-capable, REVISIT (tools not false)" >> "$GITHUB_STEP_SUMMARY"
+              else
+                if grep -iq 'invalid choice' /tmp/vm; then echo "- EVIDENCE: vLLM argparse REJECTS --tool-call-parser minicpm5 (invalid choice) -> R03/R06 tools=false ESTABLISHED" >> "$GITHUB_STEP_SUMMARY"; else echo "- vLLM minicpm5 probe inconclusive (non-choice error):" >> "$GITHUB_STEP_SUMMARY"; grep -iE 'error|usage' /tmp/vm | head -2 >> "$GITHUB_STEP_SUMMARY"; fi
+              fi ;;
             tabby)
               docker run --rm --entrypoint python3 "$ref" -c "import huggingface_hub; print('hf_hub', huggingface_hub.__version__)"
               pass "huggingface_hub import"
-              docker run --rm --entrypoint python3 -w /app "$ref" -c "import importlib; m=importlib.import_module('common.config_models'); print('tabby config model OK')"
-              pass "tabby config module import" ;;
+              # Execute the ACTUAL TabbyAPI config schema over the baked /app/config.yml (not --help): find the
+              # root pydantic model (its fields include 'network') and validate; a bad key/value fails here.
+              docker run --rm --entrypoint python3 -w /app "$ref" -c "import yaml,importlib; m=importlib.import_module('common.config_models'); C=next(c for n in dir(m) for c in [getattr(m,n)] if hasattr(c,'model_fields') and 'network' in getattr(c,'model_fields',{})); C(**yaml.safe_load(open('/app/config.yml'))); print('CONFIG_SCHEMA_OK', C.__name__)"
+              pass "TabbyAPI config schema validates baked /app/config.yml" ;;
             llama)
               docker run --rm --entrypoint sh "$ref" -c 'command -v curl && command -v sha256sum && command -v python3 && /opt/llama/llama-server --version 2>&1 | head -1'
               pass "curl + sha256sum + python3 + llama-server present" ;;
