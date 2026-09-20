@@ -327,7 +327,8 @@ jobs:
                 for f in common/errors.py endpoints/OAI/types/completion.py common/sampling.py common/config_models.py common/tabby_config.py backends/exllamav3/model.py backends/exllamav3/tokenizer.py; do p="$APP/$f"; [ -f "$p" ] && echo "SHA256 $f = $(sha256sum "$p" | cut -d' ' -f1)" || echo "ABSENT $f"; done
                 echo "### contract fields (grep of the installed source)"
                 echo '```'
-                grep -rniE 'class CompletionRequest|add_bos_token|ignore_eos|encode_special_tokens|def validate_context|cache_size|max_seq_len' "$APP/endpoints" "$APP/common" "$APP/backends" 2>/dev/null | sed "s#$APP/##" | head -40
+                grep -rniE 'class CompletionRequest|add_bos_token|ignore_eos|encode_special_tokens|def validate_context|cache_size|max_seq_len' "$APP/endpoints" "$APP/common" "$APP/backends" 2>/dev/null | sed "s#$APP/##" > /tmp/tabbyfields.txt || true
+                head -40 /tmp/tabbyfields.txt || true
                 echo '```'
               } >> "$GITHUB_STEP_SUMMARY"
               pass "Tabby source bundle exported (no weights) + shas + direct_url + fields; PARITY-ONLY, not server usage==sent" ;;
@@ -335,7 +336,7 @@ jobs:
           esac
           echo "CPU smoke passed (config-source + parser/flag resolution verified; NOT a runtime inference test)" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload tabby source bundle
-        if: inputs.engine == 'tabbysource'
+        if: always() && inputs.engine == 'tabbysource'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tabby-source-${{ inputs.image }}
