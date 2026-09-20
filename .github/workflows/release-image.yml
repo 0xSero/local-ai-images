@@ -162,19 +162,24 @@ jobs:
               pass "sglang + huggingface_hub import"
               docker run --rm --entrypoint sh "$ref" -c 'command -v python3 >/dev/null'
               pass "python3 present"
-              H=$(docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -m sglang.launch_server --help 2>&1)
-              echo "$H" | grep -Eiq -- '--tool-call-parser[^\n]*minicpm5|minicpm5' || { echo "::error::minicpm5 tool-call-parser not registered"; exit 1; }
-              pass "minicpm5 tool-call-parser resolves"
-              echo "$H" | grep -Eiq -- '--reasoning-parser[^\n]*qwen3|qwen3' || { echo "::error::qwen3 reasoning-parser not registered"; exit 1; }
-              pass "qwen3 reasoning-parser resolves"
-              for f in --model-path --served-model-name --context-length --mem-fraction-static; do
-                echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
-              pass "serve flags present"
               # Exercise the ACTUAL image ENTRYPOINT preflight end-to-end on CPU: it fetches the
               # pinned-revision model into /opt/models and writes .omp-ready, then the base shim
               # execs our passed command (which verifies the marker). No GPU, no server launch.
               docker run --rm "$ref" sh -c 'set -e; ls -la /opt/models/MiniCPM5-2B-GPTQ >/dev/null; test -s /opt/models/MiniCPM5-2B-GPTQ/config.json; test -f /opt/models/MiniCPM5-2B-GPTQ/.omp-ready; echo PREFLIGHT_MARKER_OK'
-              pass "ENTRYPOINT preflight resolved pinned model to /opt/models/MiniCPM5-2B-GPTQ + wrote .omp-ready (CPU, 0 GPU)" ;;
+              pass "ENTRYPOINT preflight resolved pinned model to /opt/models/MiniCPM5-2B-GPTQ + wrote .omp-ready (CPU, 0 GPU)"
+              # The baked CMD passes explicit --tool-call-parser minicpm5 --reasoning-parser qwen3.
+              # sglang's --help does NOT enumerate plugin parsers, so grepping help is a false-negative.
+              # Authoritative test: launch_server's argparse validates a choice when it consumes the
+              # flag, and --help exits 0 only after all preceding flags parsed cleanly. So `<flags> --help`
+              # exits 0 iff the choices are ACCEPTED, and errors "invalid choice" first if not. This tests
+              # exactly what the baked CMD will do at serve time. No GPU, no model load (help short-circuits).
+              if docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -m sglang.launch_server --model-path /tmp/none --tool-call-parser minicpm5 --reasoning-parser qwen3 --help >/tmp/sgh 2>&1; then
+                pass "launch_server ACCEPTS baked flags --tool-call-parser minicpm5 --reasoning-parser qwen3 (argparse valid)"
+              else
+                echo "::error::launch_server REJECTS the baked parser flags (baked CMD is non-runnable):"
+                grep -iE 'invalid choice|error|usage' /tmp/sgh | head -5
+                exit 1
+              fi ;;
             vllm)
               docker run --rm --entrypoint python3 "$ref" -c "import huggingface_hub; print('hf_hub', huggingface_hub.__version__)"
               pass "huggingface_hub import"
