@@ -72,6 +72,17 @@ jobs:
                 *) echo "::error::remote ADD without --checksum=sha256: in $df: $line"; fail=1;; esac
             esac
           done < <(grep -iE '^[[:space:]]*ADD[[:space:]]' "$df" || true)
+          # For deploy-<engine>-<model>-<hw> dirs the hardware is encoded in the directory name;
+          # the ai.omarchy.hardware label MUST match it (catches label drift like PKG-23 rtx-3090).
+          # pkg-NN dirs carry no hardware in the name -> cross-check against DELIVERY-24 by row id manually.
+          case "${{ inputs.image }}" in
+            deploy-*-rtx-*|deploy-*-l4-24gb)
+              want=$(echo "${{ inputs.image }}" | sed -E 's/^deploy-[a-z]+-.*-((rtx-[a-z0-9-]+)|(l4-24gb))$/\1/')
+              got=$(grep -oE 'ai\.omarchy\.hardware="[^"]+"' "$df" | sed -E 's/.*="([^"]+)"/\1/')
+              if [ -n "$want" ] && [ -n "$got" ] && [ "$want" != "$got" ]; then
+                echo "::error::hardware label '$got' != directory hardware '$want' in $df (label drift)"; fail=1
+              fi ;;
+          esac
           # ExLlamaV3 counts KV in 256-token pages and refuses a window-filling
           # request when cache == window, so a baked TabbyAPI config MUST reserve
           # cache_size strictly greater than max_seq_len. An equal pair loads fine
