@@ -3,6 +3,7 @@
 FROM ghcr.io/theroyallab/tabbyapi@sha256:1c13dd17416660856e9962aeee8498827f0acd604eb36795128a03ddfe03c6ef
 LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
 LABEL ai.omarchy.row="R25"
+LABEL ai.omarchy.package="PKG-19"
 LABEL ai.omarchy.model.repo="turboderp/Qwen3.8-27B-exl3"
 LABEL ai.omarchy.model.revision="4acd9ad5af224ec9e8815a54d71a033f378a7e9d"
 LABEL ai.omarchy.model.local_name="Qwen3.8-27B-EXL3-SC4bpw-H5"

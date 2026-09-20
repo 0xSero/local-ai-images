@@ -5,6 +5,7 @@ FROM ghcr.io/0xsero/vllm-openai@sha256:1de88ff218282ce71da7811f62ea527556648e1ad
 ENV VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0
 LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
 LABEL ai.omarchy.row="R29"
+LABEL ai.omarchy.package="PKG-23"
 LABEL ai.omarchy.model.repo="cyankiwi/Qwen3.8-27B-AWQ-INT4"
 LABEL ai.omarchy.model.revision="63768c10df38c0395e12ef49edac1bd539eaeeea"
 LABEL ai.omarchy.model.local_name="Qwen3.8-27B-AWQ-INT4"
