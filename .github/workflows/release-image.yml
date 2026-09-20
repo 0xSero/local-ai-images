@@ -224,32 +224,40 @@ jobs:
               docker run --rm --entrypoint sh "$ref" -c 'command -v curl && command -v sha256sum && command -v python3 && /opt/llama/llama-server --version 2>&1 | head -1'
               pass "curl + sha256sum + python3 + llama-server present" ;;
             proof)
-              # 5-case CPU proof of the OMP_SSH_FIRST + /opt/omp-acquire readiness contract (sglang MiniCPM).
-              # HF_ENDPOINT=http://127.0.0.1:1 forces a deterministic fetch failure with no network egress.
-              M=/opt/models/MiniCPM5-2B-GPTQ; REV=48d57c14fba6b1f86109e1a54fafb0848c163f04
-              # C1 default acquire happy-path: fetch -> marker whose content == pinned revision.
-              docker run --rm --entrypoint sh "$ref" -c "/opt/omp-acquire && [ \"\$(cat $M/.omp-ready)\" = \"$REV\" ] && echo C1_ACQUIRE_MARKER_REV_OK"
-              pass "C1 default acquire -> .omp-ready contains the pinned revision"
-              # C2 OMP_SSH_FIRST reaches the bootstrap immediately WITHOUT any fetch (fast, no marker).
+              # Readiness-contract proof, parameterised from the image's OWN labels -> works for every
+              # engine/model. HF_ENDPOINT=http://127.0.0.1:1 forces a deterministic fetch failure (no egress).
+              M=$(docker inspect "$ref" --format '{{ index .Config.Labels "ai.omarchy.model.mount" }}')
+              REV=$(docker inspect "$ref" --format '{{ index .Config.Labels "ai.omarchy.model.revision" }}')
+              [ -n "$M" ] && [ -n "$REV" ] || { echo "::error::image missing model.mount/model.revision labels"; exit 1; }
+              echo "- proof target: mount=\`$M\` rev=\`$REV\`" >> "$GITHUB_STEP_SUMMARY"
+              SMALL=0; case "$(basename "$M")" in MiniCPM5*|Ternary-Bonsai*) SMALL=1;; esac
+              # C1 (small models only; large weights exceed CI disk): full acquire -> marker == pinned rev.
+              if [ "$SMALL" = "1" ]; then
+                docker run --rm --entrypoint sh "$ref" -c "/opt/omp-acquire && [ \"\$(cat $M/.omp-ready)\" = \"$REV\" ] && echo C1_ACQUIRE_MARKER_REV_OK"
+                pass "C1 default acquire -> .omp-ready == pinned revision"
+              else
+                echo "- C1 full-fetch skipped (large model exceeds CI disk; acquire mechanism identical + hardware-proven on the pilot)" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              # C2 OMP_SSH_FIRST bootstrap-first, no fetch, no marker.
               O=$(docker run --rm -e OMP_SSH_FIRST=1 "$ref" sh -c "test ! -f $M/.omp-ready && echo C2_BOOTSTRAP_NO_FETCH")
-              echo "$O" | grep -q C2_BOOTSTRAP_NO_FETCH || { echo "::error::OMP_SSH_FIRST did not exec bootstrap-first without fetching"; exit 1; }
+              echo "$O" | grep -q C2_BOOTSTRAP_NO_FETCH || { echo "::error::OMP_SSH_FIRST did not bootstrap-first without fetching"; exit 1; }
               pass "C2 OMP_SSH_FIRST=1 execs the bootstrap first, no fetch, no marker"
-              # C3 OMP_SSH_FIRST reachable EVEN on a deliberate fetch failure (it never fetches at all).
+              # C3 OMP_SSH_FIRST reachable even on a deliberate fetch failure (it never fetches).
               O=$(docker run --rm -e OMP_SSH_FIRST=1 -e HF_ENDPOINT=http://127.0.0.1:1 "$ref" sh -c 'echo C3_BOOTSTRAP_REACHED_DESPITE_FETCH_FAIL')
               echo "$O" | grep -q C3_BOOTSTRAP_REACHED_DESPITE_FETCH_FAIL || { echo "::error::OMP_SSH_FIRST bootstrap blocked by fetch failure"; exit 1; }
               pass "C3 OMP_SSH_FIRST bootstrap reachable despite a forced fetch failure"
-              # C4 acquire failure is observable: nonzero exit AND no marker left.
+              # C4 acquire failure observable: nonzero exit AND no marker.
               O=$(docker run --rm -e HF_ENDPOINT=http://127.0.0.1:1 --entrypoint sh "$ref" -c "OMP_ACQUIRE_TIMEOUT=30 /opt/omp-acquire; echo C4_RC=\$?; test ! -f $M/.omp-ready && echo C4_NO_MARKER_ON_FAIL" 2>&1 || true)
               echo "$O" | grep -q 'C4_RC=[^0]' || { echo "::error::acquire did not exit nonzero on failure: $O"; exit 1; }
               echo "$O" | grep -q C4_NO_MARKER_ON_FAIL || { echo "::error::acquire left a marker after failure"; exit 1; }
               pass "C4 acquire fails closed: nonzero exit + no marker"
-              # C5 default path fails closed -> the server is NEVER reached before weights.
+              # C5 default path fail-closed: container exits nonzero, server never reached before weights.
               if docker run --rm -e HF_ENDPOINT=http://127.0.0.1:1 -e OMP_ACQUIRE_TIMEOUT=30 "$ref" sh -c 'echo C5_REACHED_SERVE' >/tmp/c5 2>&1; then
-                echo "::error::default path reached serve despite fetch failure"; cat /tmp/c5; exit 1
+                echo "::error::default path did not fail closed on fetch failure"; cat /tmp/c5; exit 1
               else
-                grep -q C5_REACHED_SERVE /tmp/c5 && { echo "::error::serve command ran before weights"; exit 1; } || pass "C5 default path fails closed: no serve before weights"
+                grep -q C5_REACHED_SERVE /tmp/c5 && { echo "::error::serve ran before weights"; exit 1; } || pass "C5 default path fails closed: nonzero, no serve before weights"
               fi
-              echo "READINESS_PROOF_COMPLETE (5/5)" >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "READINESS_PROOF_COMPLETE ($([ "$SMALL" = 1 ] && echo 5/5 || echo 4/4 + C1-hardware))" >> "$GITHUB_STEP_SUMMARY" ;;
             *) echo "::error::unknown engine '$e'"; exit 1;;
           esac
           echo "CPU smoke passed (config-source + parser/flag resolution verified; NOT a runtime inference test)" >> "$GITHUB_STEP_SUMMARY"
