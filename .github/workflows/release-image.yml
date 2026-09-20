@@ -14,6 +14,18 @@ on:
         description: attach an SBOM; disable for images whose package tree exceeds the 40 MB attestation limit
         required: false
         default: "true"
+      smoke:
+        description: "smoke mode: skip build; anonymous full amd64 pull of `digest` + CPU import/parser checks"
+        required: false
+        default: "false"
+      digest:
+        description: "smoke mode: sha256 digest of the published image to pull and verify"
+        required: false
+        default: ""
+      engine:
+        description: "smoke mode: sglang | vllm | tabby | llama (selects CPU checks)"
+        required: false
+        default: ""
 permissions:
   contents: read
   packages: write
@@ -21,6 +33,7 @@ permissions:
   attestations: write
 jobs:
   build:
+    if: inputs.smoke != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Free runner disk
@@ -112,3 +125,67 @@ jobs:
               | sed -E 's/^/  - `/; s/[[:space:]]*$/`/'
             echo "- verify: \`gh attestation verify oci://$out -o 0xSero\`"
           } >> "$GITHUB_STEP_SUMMARY"
+  smoke:
+    if: inputs.smoke == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          df -h /
+      - name: Anonymous full amd64 pull + digest verify (fail-closed)
+        run: |
+          set -euo pipefail
+          test -n "${{ inputs.digest }}" || { echo "::error::smoke needs a digest input"; exit 1; }
+          ref="ghcr.io/0xsero/${{ inputs.image }}@${{ inputs.digest }}"
+          docker logout ghcr.io || true   # force an anonymous pull of the public image
+          docker pull --platform linux/amd64 "$ref"
+          got=$(docker image inspect "$ref" --format '{{ index .RepoDigests 0 }}' | sed 's/.*@//')
+          echo "requested=${{ inputs.digest }}"
+          echo "resolved =$got"
+          [ "$got" = "${{ inputs.digest }}" ] || { echo "::error::pulled digest != pinned digest"; exit 1; }
+          {
+            echo "## smoke ${{ inputs.image }}"
+            echo "- anonymous full linux/amd64 pull: OK (all layers fetched + integrity-checked by docker)"
+            echo "- digest verified: \`${{ inputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: CPU import + parser/flag checks (fail-closed)
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/0xsero/${{ inputs.image }}@${{ inputs.digest }}"
+          e="${{ inputs.engine }}"
+          pass(){ echo "- $1: PASS" >> "$GITHUB_STEP_SUMMARY"; }
+          case "$e" in
+            sglang)
+              docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -c "import sglang, huggingface_hub; print('sglang', getattr(sglang,'__version__','?'), 'hf_hub', huggingface_hub.__version__)"
+              pass "sglang + huggingface_hub import"
+              docker run --rm --entrypoint sh "$ref" -c 'command -v python3 >/dev/null'
+              pass "python3 present"
+              H=$(docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -m sglang.launch_server --help 2>&1)
+              echo "$H" | grep -Eiq -- '--tool-call-parser[^\n]*minicpm5|minicpm5' || { echo "::error::minicpm5 tool-call-parser not registered"; exit 1; }
+              pass "minicpm5 tool-call-parser resolves"
+              echo "$H" | grep -Eiq -- '--reasoning-parser[^\n]*qwen3|qwen3' || { echo "::error::qwen3 reasoning-parser not registered"; exit 1; }
+              pass "qwen3 reasoning-parser resolves"
+              for f in --model-path --served-model-name --context-length --mem-fraction-static; do
+                echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
+              pass "serve flags present" ;;
+            vllm)
+              docker run --rm --entrypoint python3 "$ref" -c "import huggingface_hub; print('hf_hub', huggingface_hub.__version__)"
+              pass "huggingface_hub import"
+              H=$(docker run --rm --entrypoint vllm "$ref" serve --help 2>&1)
+              for f in --model --served-model-name --max-model-len --gpu-memory-utilization --kv-cache-dtype --trust-remote-code; do
+                echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
+              pass "vllm serve flags present"
+              echo "$H" | grep -iq minicpm5 && echo "- note: minicpm5 tool-parser IS in this vLLM build" >> "$GITHUB_STEP_SUMMARY" || echo "- note: minicpm5 tool-parser ABSENT (serve-only correct)" >> "$GITHUB_STEP_SUMMARY" ;;
+            tabby)
+              docker run --rm --entrypoint python3 "$ref" -c "import huggingface_hub; print('hf_hub', huggingface_hub.__version__)"
+              pass "huggingface_hub import"
+              docker run --rm --entrypoint python3 -w /app "$ref" -c "import importlib; m=importlib.import_module('common.config_models'); print('tabby config model OK')"
+              pass "tabby config module import" ;;
+            llama)
+              docker run --rm --entrypoint sh "$ref" -c 'command -v curl && command -v sha256sum && command -v python3 && /opt/llama/llama-server --version 2>&1 | head -1'
+              pass "curl + sha256sum + python3 + llama-server present" ;;
+            *) echo "::error::unknown engine '$e'"; exit 1;;
+          esac
+          echo "CPU smoke passed (config-source + parser/flag resolution verified; NOT a runtime inference test)" >> "$GITHUB_STEP_SUMMARY"
