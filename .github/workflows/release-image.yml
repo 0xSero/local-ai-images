@@ -169,7 +169,12 @@ jobs:
               pass "qwen3 reasoning-parser resolves"
               for f in --model-path --served-model-name --context-length --mem-fraction-static; do
                 echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
-              pass "serve flags present" ;;
+              pass "serve flags present"
+              # Exercise the ACTUAL image ENTRYPOINT preflight end-to-end on CPU: it fetches the
+              # pinned-revision model into /opt/models and writes .omp-ready, then the base shim
+              # execs our passed command (which verifies the marker). No GPU, no server launch.
+              docker run --rm "$ref" sh -c 'set -e; ls -la /opt/models/MiniCPM5-2B-GPTQ >/dev/null; test -s /opt/models/MiniCPM5-2B-GPTQ/config.json; test -f /opt/models/MiniCPM5-2B-GPTQ/.omp-ready; echo PREFLIGHT_MARKER_OK'
+              pass "ENTRYPOINT preflight resolved pinned model to /opt/models/MiniCPM5-2B-GPTQ + wrote .omp-ready (CPU, 0 GPU)" ;;
             vllm)
               docker run --rm --entrypoint python3 "$ref" -c "import huggingface_hub; print('hf_hub', huggingface_hub.__version__)"
               pass "huggingface_hub import"
