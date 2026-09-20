@@ -183,7 +183,7 @@ jobs:
             vllm)
               docker run --rm --entrypoint python3 "$ref" -c "import huggingface_hub; print('hf_hub', huggingface_hub.__version__)"
               pass "huggingface_hub import"
-              H=$(docker run --rm --entrypoint vllm "$ref" serve --help 2>&1)
+              H=$(docker run --rm --entrypoint vllm "$ref" serve /tmp/none --help 2>&1 || true)
               for f in --model --served-model-name --max-model-len --gpu-memory-utilization --kv-cache-dtype --trust-remote-code; do
                 echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
               pass "vllm serve flags present"
