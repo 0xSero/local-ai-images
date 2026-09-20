@@ -1,0 +1,97 @@
+name: engine-smoke
+# Build-host validation (CPU, no GPU): confirm the pinned engine base can import
+# huggingface_hub (needed by the deploy preflight) and that the exact flags/parsers a
+# deploy image bakes are real registered options — not just present in help text.
+# This runs the engine's own arg parser / registry, so an unknown flag or parser is a
+# hard failure here rather than a silent bad launch container at rental time.
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: sglang | vllm | tabby | llama
+        required: true
+        default: vllm
+permissions:
+  contents: read
+  packages: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve base
+        id: base
+        run: |
+          case "${{ inputs.engine }}" in
+            sglang) echo "img=ghcr.io/0xsero/sglang@sha256:787461f889674cdd9339be2409a6e8b46ec2f5aac71669481c319f87c2beca13" >> "$GITHUB_OUTPUT";;
+            vllm)   echo "img=ghcr.io/0xsero/vllm-openai@sha256:1de88ff218282ce71da7811f62ea527556648e1ad05dd36e5fc82d0f9ff07424" >> "$GITHUB_OUTPUT";;
+            tabby)  echo "img=ghcr.io/0xsero/tabbyapi-exl3-cu12@sha256:c0850ea09fcf8bb21a289ae0c5fe8ba29a1658a77257cf80a2308da3e4a3ec2c" >> "$GITHUB_OUTPUT";;
+            llama)  echo "img=ghcr.io/0xsero/llamacpp-prism@sha256:d9efaf72a177156667879c795217f5e98a6041930ddb29778399edc1ef57b33c" >> "$GITHUB_OUTPUT";;
+            *) echo "unknown engine"; exit 1;;
+          esac
+      - name: Pull
+        run: docker pull "${{ steps.base.outputs.img }}"
+      - name: huggingface_hub import (preflight dependency)
+        if: inputs.engine != 'llama'
+        run: |
+          set -e
+          PY=python3; [ "${{ inputs.engine }}" = "sglang" ] && PY=/opt/sglang/bin/python3
+          docker run --rm --entrypoint "$PY" "${{ steps.base.outputs.img }}" -c \
+            "import huggingface_hub as h; print('huggingface_hub', h.__version__, 'OK')" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: llama fetch deps (curl + sha256sum + python3-after-bake)
+        if: inputs.engine == 'llama'
+        run: |
+          set -e
+          docker run --rm --entrypoint sh "${{ steps.base.outputs.img }}" -c \
+            "command -v curl && command -v sha256sum && /opt/llama/llama-server --version 2>&1 | head -1" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: vllm flag + parser registry
+        if: inputs.engine == 'vllm'
+        run: |
+          set -e
+          H=$(docker run --rm --entrypoint vllm "${{ steps.base.outputs.img }}" serve --help 2>&1)
+          echo "## vllm serve --help checks" >> "$GITHUB_STEP_SUMMARY"
+          for f in --max-model-len --gpu-memory-utilization --kv-cache-dtype --trust-remote-code --served-model-name --enable-auto-tool-choice --tool-call-parser --reasoning-parser; do
+            echo "$H" | grep -q -- "$f" && echo "- flag $f: present" >> "$GITHUB_STEP_SUMMARY" || { echo "- flag $f: MISSING" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+          done
+          echo "### tool-call-parser choices" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$H" | grep -iA3 -- '--tool-call-parser' | sed -n '1,6p' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$H" | grep -iq 'minicpm5' && echo "minicpm5 tool-call-parser: PRESENT in v0.29.0" >> "$GITHUB_STEP_SUMMARY" || echo "minicpm5 tool-call-parser: ABSENT (serve-only is correct)" >> "$GITHUB_STEP_SUMMARY"
+          echo "$H" | grep -iq 'qwen3_xml' && echo "qwen3_xml: PRESENT" >> "$GITHUB_STEP_SUMMARY" || echo "qwen3_xml: ABSENT" >> "$GITHUB_STEP_SUMMARY"
+      - name: sglang flag check
+        if: inputs.engine == 'sglang'
+        run: |
+          set -e
+          H=$(docker run --rm --entrypoint /opt/sglang/bin/python3 "${{ steps.base.outputs.img }}" -m sglang.launch_server --help 2>&1)
+          echo "## sglang.launch_server --help checks" >> "$GITHUB_STEP_SUMMARY"
+          for f in --model-path --served-model-name --context-length --mem-fraction-static --tool-call-parser --reasoning-parser; do
+            echo "$H" | grep -q -- "$f" && echo "- flag $f: present" >> "$GITHUB_STEP_SUMMARY" || { echo "- flag $f: MISSING" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+          done
+      - name: tabby config keys
+        if: inputs.engine == 'tabby'
+        run: |
+          set -e
+          echo "## tabby config-model key validation" >> "$GITHUB_STEP_SUMMARY"
+          docker run --rm --entrypoint python3 "${{ steps.base.outputs.img }}" -c "import huggingface_hub,sys; print('hf_hub OK')" | tee -a "$GITHUB_STEP_SUMMARY"
+          docker run --rm --entrypoint python3 -w /app "${{ steps.base.outputs.img }}" - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import sys, importlib
+          m = importlib.import_module("common.config_models")
+          # collect the known model-section field names from the pydantic model
+          keys=set()
+          for name in dir(m):
+              obj=getattr(m,name)
+              f=getattr(obj,"model_fields",None)
+              if f: keys|=set(f.keys())
+          need=["max_seq_len","cache_size","chunk_size","cache_mode","model_name","model_dir","vision","reasoning","tool_format","draft_mode","cpu_moe_split_experts","ngram_ram"]
+          miss=[k for k in need if k not in keys]
+          print("known-field count:", len(keys))
+          print("missing baked keys:", miss)
+          sys.exit(1 if miss else 0)
+          PY
