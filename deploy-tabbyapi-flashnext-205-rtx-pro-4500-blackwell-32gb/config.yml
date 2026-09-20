@@ -29,7 +29,7 @@ model:
   tensor_parallel: false
   gpu_split_auto: true
   autosplit_reserve: [512]
-  chunk_size: undefined
+  chunk_size: 2048
   output_chunking: true
   max_batch_size: 2
   vision: true
