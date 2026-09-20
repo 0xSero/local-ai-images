@@ -57,3 +57,11 @@ AutoTokenizer.from_pretrained(dir, local_files_only=True, trust_remote_code=Fals
 => (1) .chat_template loads local-only (no network) + trust_remote_code=False for every dir; (2) render is
   template-driven and identical across both pinned transformers versions (version-invariant). No tabby package
   fails the long-context gate on this dep. A future revision that drops the template exits nonzero (rc1 fail-closed).
+
+## Token endpoints (/v1/token/encode + /v1/token/decode) present, not stripped
+Installed endpoints/core/router.py: "/v1/token/encode" (line 400 -> encode_tokens -> TokenEncodeResponse),
+"/v1/token/decode" (line 458 -> decode_tokens -> TokenDecodeResponse). router.py byte-identical across cu12
+(@47c4c6eb) + cu13 (@80f9e2be): sha256 100427688dbf1508123d9753a6b0677ccffe8ae54a593eae87c910fce6eb7ac4.
+No package strips them: every tabby deploy Dockerfile's only mutation over the engine base is
+`COPY config.yml /app/config.yml` (config + labels), never a /app source rewrite -> endpoints inherited
+unchanged in all tabby packages. Supports BenchmarkRepair's encode->truncate->decode bounded-length path.
