@@ -8,7 +8,7 @@ log() { echo "[omp-acquire] $*"; echo "[omp-acquire] $*" >>"$LOG" 2>/dev/null ||
 g() { f="$1"; s="$2"
   if [ -f "$D/$f" ] && echo "$s  $D/$f" | sha256sum -c - >/dev/null 2>&1; then log "$f present + sha ok"; return 0; fi
   rm -f "$D/$f"; log "fetch $f @ $REV"
-  if ! curl -fL --max-time "${OMP_ACQUIRE_TIMEOUT:-1800}" "https://huggingface.co/$REPO/resolve/$REV/$f" -o "$D/$f" >>"$LOG" 2>&1; then log "curl $f FAILED"; return 3; fi
+  if ! curl -fL --max-time "${OMP_ACQUIRE_TIMEOUT:-1800}" "${HF_ENDPOINT:-https://huggingface.co}/$REPO/resolve/$REV/$f" -o "$D/$f" >>"$LOG" 2>&1; then log "curl $f FAILED"; return 3; fi
   if ! echo "$s  $D/$f" | sha256sum -c - >>"$LOG" 2>&1; then log "sha256 MISMATCH $f"; rm -f "$D/$f"; return 3; fi
 }
 if [ -f "$D/.omp-ready" ] && [ "$(cat "$D/.omp-ready" 2>/dev/null)" = "$REV" ]; then log "already at $REV"; exit 0; fi
