@@ -167,6 +167,14 @@ jobs:
               # execs our passed command (which verifies the marker). No GPU, no server launch.
               docker run --rm "$ref" sh -c 'set -e; ls -la /opt/models/MiniCPM5-2B-GPTQ >/dev/null; test -s /opt/models/MiniCPM5-2B-GPTQ/config.json; test -f /opt/models/MiniCPM5-2B-GPTQ/.omp-ready; echo PREFLIGHT_MARKER_OK'
               pass "ENTRYPOINT preflight resolved pinned model to /opt/models/MiniCPM5-2B-GPTQ + wrote .omp-ready (CPU, 0 GPU)"
+              # Tokenizer availability (BenchmarkRepair): the bench client must use the model's OWN
+              # AutoTokenizer / native chat template on the pod, not an assumed /tokenize route.
+              docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -c "import transformers; from transformers import AutoTokenizer; print('transformers', transformers.__version__, 'AutoTokenizer OK')"
+              pass "transformers + AutoTokenizer importable in-image"
+              # After the preflight fetch, the model dir must carry its tokenizer + chat template, and
+              # AutoTokenizer.from_pretrained must load it locally (no network, no pip overlay).
+              docker run --rm "$ref" sh -c 'ls /opt/models/MiniCPM5-2B-GPTQ/ | grep -iE "tokenizer|vocab|merges|special_tokens|chat_template" | tee /tmp/tk; test -s /tmp/tk; /opt/sglang/bin/python3 -c "from transformers import AutoTokenizer; t=AutoTokenizer.from_pretrained(\"/opt/models/MiniCPM5-2B-GPTQ\", trust_remote_code=True); print(\"TOKENIZER_LOADED vocab_size=\"+str(getattr(t,\"vocab_size\",\"?\"))+\" chat_template=\"+(\"yes\" if getattr(t,\"chat_template\",None) else \"no\"))'
+              pass "model dir carries tokenizer files + AutoTokenizer.from_pretrained loads locally"
               # The baked CMD passes explicit --tool-call-parser minicpm5 --reasoning-parser qwen3.
               # sglang's --help does NOT enumerate plugin parsers, so grepping help is a false-negative.
               # Authoritative test: launch_server's argparse validates a choice when it consumes the
