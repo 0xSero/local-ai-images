@@ -59,6 +59,18 @@ jobs:
                 *) echo "::error::remote ADD without --checksum=sha256: in $df: $line"; fail=1;; esac
             esac
           done < <(grep -iE '^[[:space:]]*ADD[[:space:]]' "$df" || true)
+          # ExLlamaV3 counts KV in 256-token pages and refuses a window-filling
+          # request when cache == window, so a baked TabbyAPI config MUST reserve
+          # cache_size strictly greater than max_seq_len. An equal pair loads fine
+          # and then fails on the one request that fills the window.
+          cfg="$dir/config.yml"
+          if [ -f "$cfg" ]; then
+            ms=$(sed -nE 's/^[[:space:]]*max_seq_len:[[:space:]]*([0-9]+).*/\1/p' "$cfg" | head -1)
+            cs=$(sed -nE 's/^[[:space:]]*cache_size:[[:space:]]*([0-9]+).*/\1/p' "$cfg" | head -1)
+            if [ -n "$ms" ] && [ -n "$cs" ] && [ "$cs" -le "$ms" ]; then
+              echo "::error::$cfg cache_size ($cs) must be > max_seq_len ($ms)"; fail=1
+            fi
+          fi
           exit $fail
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
