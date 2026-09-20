@@ -14,7 +14,8 @@ LABEL ai.omarchy.model.quant="awq-4bit"
 LABEL ai.omarchy.hardware="rtx-3080-ti-12gb"
 LABEL ai.omarchy.target_context_tokens="131072"
 LABEL ai.omarchy.engine_base_cuda_floor="13.0"
-LABEL ai.omarchy.pinned_startup="vllm serve --max-model-len 131072 --kv-cache-dtype fp8 --gpu-memory-utilization 0.92"
+LABEL ai.omarchy.pinned_startup.note="actual baked CMD; DELIVERY --enable-auto-tool-choice stripped (no vLLM MiniCPM5 tool parser)"
+LABEL ai.omarchy.pinned_startup="vllm serve /opt/models/MiniCPM5-2B-GPTQ --served-model-name MiniCPM5-2B-GPTQ --host 0.0.0.0 --port 8000 --max-model-len 131072 --kv-cache-dtype fp8 --gpu-memory-utilization 0.92 --trust-remote-code"
 LABEL ai.omarchy.capabilities.tools="engine-unsupported"
 COPY deploy-preflight.sh /opt/deploy-preflight.sh
 RUN chmod 0755 /opt/deploy-preflight.sh
