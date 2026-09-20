@@ -45,3 +45,15 @@ direct_url=file:///app, no VCS metadata => cu12 commit remains UNKNOWN. The cont
 actual installed bytes bound to the image digests + the upstream byte match on those six files — that is
 sufficient; the commit stays truthfully unknown. exllamav3 differs by build only (cu12 v1.5.0+cu128.torch2.9.0
 vs cu13 v1.5.0+cu132.torch2.11.0; same release v1.5.0).
+
+## Long-context adapter tokenizer/template dep-check (BenchmarkRepair, in-image, fail-closed)
+Probe engine=tabbytmpl: per EXL3 model dir, snapshot_download tokenizer/config ONLY (no weights), then
+AutoTokenizer.from_pretrained(dir, local_files_only=True, trust_remote_code=False). Ran inside BOTH images.
+- cu12 image (transformers 4.57.6, run 35521000062) and cu13 image (transformers 5.17.0, run 35521002667):
+  ALL 7 distinct EXL3 dirs => template=PRESENT, chat_template_sha=c3cf9e34, vocab=248044,
+  enable_thinking=True renders '...<|im_start|>assistant\n<think>\n'. ALL_TABBY_TEMPLATE_LOCAL_OK=True both runs.
+  Dirs: turboderp/Qwen3.8-27B-exl3 @ {e5e1f4b3 2bpw, 004a8871 3bpw, 4acd9ad5 4bpw, 516bf129 4bpwv6,
+  f33f26d9 5bpw, 60d005a2 6bpw} + turboderp/Qwen3.8-Flash-Next-exl3 @ 65c89531 2.05bpw.
+=> (1) .chat_template loads local-only (no network) + trust_remote_code=False for every dir; (2) render is
+  template-driven and identical across both pinned transformers versions (version-invariant). No tabby package
+  fails the long-context gate on this dep. A future revision that drops the template exits nonzero (rc1 fail-closed).
