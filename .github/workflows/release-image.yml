@@ -29,6 +29,37 @@ jobs:
           sudo docker system prune -af
           df -h /
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Verify pins
+        run: |
+          set -euo pipefail
+          dir="./${{ inputs.image }}"
+          df="$dir/Dockerfile"
+          test -f "$df" || { echo "::error::$df not found"; exit 1; }
+          fail=0
+          # Every FROM must reference an upstream image by @sha256: digest,
+          # unless it names an earlier build stage. A tag is never enough:
+          # recipes pin the digest this workflow prints, so the base it was
+          # built on must be pinned too.
+          stages=""
+          while IFS= read -r ref alias; do
+            case " $stages " in *" $ref "*) continue;; esac
+            case "$ref" in
+              scratch) ;;
+              *@sha256:*) ;;
+              *) echo "::error::unpinned FROM '$ref' in $df (pin by @sha256:)"; fail=1;;
+            esac
+            [ -n "$alias" ] && stages="$stages $alias"
+          done < <(grep -iE '^[[:space:]]*FROM[[:space:]]' "$df" \
+            | sed -E 's/^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?([^[:space:]]+)([[:space:]]+[Aa][Ss][[:space:]]+([^[:space:]]+))?.*/\2 \4/')
+          # Every remote ADD must carry a --checksum= so the fetched asset is
+          # pinned to a content hash, not just a URL.
+          while IFS= read -r line; do
+            case "$line" in *http*://*)
+              case "$line" in *--checksum=sha256:*) ;;
+                *) echo "::error::remote ADD without --checksum=sha256: in $df: $line"; fail=1;; esac
+            esac
+          done < <(grep -iE '^[[:space:]]*ADD[[:space:]]' "$df" || true)
+          exit $fail
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
@@ -45,13 +76,27 @@ jobs:
           tags: ghcr.io/0xsero/${{ inputs.image }}:${{ inputs.tag }}
           provenance: mode=max
           sbom: ${{ inputs.sbom == 'true' }}
+          # Shared-layer reuse across builds of the same base (apt layers,
+          # base pulls) so repeated matrix builds do not rebuild every layer.
+          cache-from: type=gha,scope=${{ inputs.image }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.image }}
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-name: ghcr.io/0xsero/${{ inputs.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-      - name: Print digest
+      - name: Record provenance
         run: |
-          echo "IMAGE=ghcr.io/0xsero/${{ inputs.image }}@${{ steps.push.outputs.digest }}"
-          echo "ghcr.io/0xsero/${{ inputs.image }}@${{ steps.push.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          out="ghcr.io/0xsero/${{ inputs.image }}@${{ steps.push.outputs.digest }}"
+          echo "IMAGE=$out"
+          {
+            echo "## ${{ inputs.image }}:${{ inputs.tag }}"
+            echo ""
+            echo "- image: \`$out\`"
+            echo "- base pins:"
+            grep -iE '^[[:space:]]*FROM[[:space:]]' "./${{ inputs.image }}/Dockerfile" \
+              | sed -E 's/^/  - `/; s/[[:space:]]*$/`/'
+            echo "- verify: \`gh attestation verify oci://$out -o 0xSero\`"
+          } >> "$GITHUB_STEP_SUMMARY"
