@@ -65,3 +65,16 @@ Installed endpoints/core/router.py: "/v1/token/encode" (line 400 -> encode_token
 No package strips them: every tabby deploy Dockerfile's only mutation over the engine base is
 `COPY config.yml /app/config.yml` (config + labels), never a /app source rewrite -> endpoints inherited
 unchanged in all tabby packages. Supports BenchmarkRepair's encode->truncate->decode bounded-length path.
+
+## Tested Tabby launch layout (for the staged baked-config recorder route; all 13 packages)
+1. config.yml BAKED at /app/config.yml (Dockerfile: COPY config.yml /app/config.yml). NOT mounted; it is in the image.
+2. Recipe references the digest-pinned image (contains the baked config). NO separate asset config.yml is published or mounted.
+3. Config addressing (CORRECTS the frozen recorder's /workspace/models rewrite): model.model_dir=/opt/models (constant PARENT
+   across all 13) + model.model_name=<local_name> (per-package subdir = ai.omarchy.model.local_name label). Served model =
+   /opt/models/<local_name>. Weights are NOT host-mounted: baked ENTRYPOINT /opt/deploy-preflight.sh -> /opt/omp-acquire runs
+   snapshot_download(repo, revision=pinned, local_dir=/opt/models/<local_name>) in-container at start (fail-closed, .omp-ready=rev).
+   Optional persistent volume mounts at /opt/models (so /opt/models/<local_name> caches); no mount required.
+4. No external config.yml override anywhere; always the baked /app/config.yml (disable_fetch_requests true, disable_auth true,
+   api_servers ["OAI"], port 5000). No VOLUME / -v / /workspace in any tabby Dockerfile.
+Baked knobs: max_seq_len/cache_size per-row, cache_mode Q4, reasoning true, start_in_reasoning always,
+template_vars_default.enable_thinking true, tool_format qwen3_coder, draft_mode mtp.
