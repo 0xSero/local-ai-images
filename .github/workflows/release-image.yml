@@ -178,14 +178,16 @@ jobs:
               # execs our passed command (which verifies the marker). No GPU, no server launch.
               docker run --rm "$ref" sh -c 'set -e; ls -la /opt/models/MiniCPM5-2B-GPTQ >/dev/null; test -s /opt/models/MiniCPM5-2B-GPTQ/config.json; test -f /opt/models/MiniCPM5-2B-GPTQ/.omp-ready; echo PREFLIGHT_MARKER_OK'
               pass "ENTRYPOINT preflight resolved pinned model to /opt/models/MiniCPM5-2B-GPTQ + wrote .omp-ready (CPU, 0 GPU)"
-              # Tokenizer availability (BenchmarkRepair/Main): the bench client builds prompts with the
-              # model's OWN local AutoTokenizer on the pod (SGLang has no /tokenize). Main default is
-              # trust_remote_code=False; flag if the pinned model needs True. local_files_only=True = no net.
+              # Tokenizer (BenchmarkRepair/Main): the bench client builds prompts with the model's OWN
+              # local AutoTokenizer on the pod for SGLang AND vLLM. Reason is NOT a missing endpoint
+              # (v0.5.19 has /tokenize) but that add_generation_prompt is swallowed by extra="allow" and
+              # never consulted server-side, so only the local tokenizer controls the generation prompt.
+              # Main default: local_files_only=True, trust_remote_code=False; flag if the pin needs True.
               docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -c "import transformers; from transformers import AutoTokenizer; print('transformers', transformers.__version__)"
               pass "transformers + AutoTokenizer importable in-image"
               docker run --rm "$ref" sh -c 'ls /opt/models/MiniCPM5-2B-GPTQ/ | grep -iE "tokenizer|vocab|merges|special_tokens|chat_template" | tee /tmp/tk; test -s /tmp/tk; echo TOKENIZER_FILES_PRESENT'
               pass "mounted model dir carries tokenizer + chat_template files"
-              if docker run --rm "$ref" /opt/sglang/bin/python3 -c "from transformers import AutoTokenizer as A; t=A.from_pretrained('/opt/models/MiniCPM5-2B-GPTQ', local_files_only=True, trust_remote_code=False); print('TRC_FALSE_OK vocab_size='+str(getattr(t,'vocab_size','?'))+' chat_template='+('yes' if getattr(t,'chat_template',None) else 'no'))" >/tmp/tok 2>&1; then
+              if docker run --rm "$ref" /opt/sglang/bin/python3 -c "from transformers import AutoTokenizer as A; import hashlib; t=A.from_pretrained('/opt/models/MiniCPM5-2B-GPTQ', local_files_only=True, trust_remote_code=False); ct=getattr(t,'chat_template',None); d=t.apply_chat_template([{'role':'user','content':'hi'}], add_generation_prompt=True, tokenize=True, return_dict=True); ids=d['input_ids']; print('TRC_FALSE_OK vocab_size='+str(getattr(t,'vocab_size','?'))+' chat_template_sha256='+(hashlib.sha256(ct.encode()).hexdigest() if ct else 'NONE')+' apply_chat_template_n_ids='+str(len(ids))+' first_ids='+str(list(ids[:6])))" >/tmp/tok 2>&1; then
                 cat /tmp/tok; pass "AutoTokenizer loads local_files_only=True trust_remote_code=False (Main default)"
               else
                 echo "- trust_remote_code=False failed:" >> "$GITHUB_STEP_SUMMARY"; tail -3 /tmp/tok >> "$GITHUB_STEP_SUMMARY"
