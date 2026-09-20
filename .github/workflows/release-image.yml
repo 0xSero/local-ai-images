@@ -187,6 +187,15 @@ jobs:
               for f in --model --served-model-name --max-model-len --gpu-memory-utilization --kv-cache-dtype --trust-remote-code; do
                 echo "$H" | grep -q -- "$f" || { echo "::error::flag $f missing"; exit 1; }; done
               pass "vllm serve flags present"
+              # Surface the ENUMERATED parser registries from --help (the registry itself, not an exit-code
+              # inference): proves which parsers ARE/ARE NOT available and survives future error-text changes.
+              {
+                echo "### vLLM parser registries (from serve --help)"
+                echo '```'
+                echo "$H" | grep -iE -- '--tool-call-parser' -A3 | sed -n '1,4p'
+                echo "$H" | grep -iE -- '--reasoning-parser' -A3 | sed -n '1,4p'
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
               # Authoritative argparse acceptance of the tool-capable parser flags (R18/R22/R29 bake these):
               # `serve <flags> --help` exits 0 iff the choices are valid, errors "invalid choice" first if not.
               if docker run --rm --entrypoint vllm "$ref" serve /tmp/none --max-model-len 40960 --enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3 --help >/tmp/vh 2>&1; then
@@ -206,8 +215,11 @@ jobs:
               pass "huggingface_hub import"
               # Execute the ACTUAL TabbyAPI config schema over the baked /app/config.yml (not --help): find the
               # root pydantic model (its fields include 'network') and validate; a bad key/value fails here.
-              docker run --rm --entrypoint python3 -w /app "$ref" -c "import yaml,importlib; m=importlib.import_module('common.config_models'); C=next(c for n in dir(m) for c in [getattr(m,n)] if hasattr(c,'model_fields') and 'network' in getattr(c,'model_fields',{})); C(**yaml.safe_load(open('/app/config.yml'))); print('CONFIG_SCHEMA_OK', C.__name__)"
-              pass "TabbyAPI config schema validates baked /app/config.yml" ;;
+              R=$(docker run --rm --entrypoint python3 -w /app "$ref" -c "import yaml,importlib; m=importlib.import_module('common.config_models'); C=next(c for n in dir(m) for c in [getattr(m,n)] if hasattr(c,'model_fields') and 'network' in getattr(c,'model_fields',{})); cfg=C(**yaml.safe_load(open('/app/config.yml'))); mo=getattr(cfg,'model',cfg); f=lambda k: getattr(mo,k,'?'); print('CONFIG_SCHEMA_OK', C.__name__); print('RESOLVED max_seq_len=%s cache_size=%s chunk_size=%s cache_mode=%s' % (f('max_seq_len'), f('cache_size'), f('chunk_size'), f('cache_mode')))")
+              echo "$R"
+              echo "$R" | grep -q CONFIG_SCHEMA_OK || { echo "::error::tabby config schema rejected baked config.yml"; exit 1; }
+              pass "TabbyAPI config schema validates baked /app/config.yml"
+              echo "- tabby engine-resolved values: \`$(echo "$R" | grep RESOLVED)\`" >> "$GITHUB_STEP_SUMMARY" ;;
             llama)
               docker run --rm --entrypoint sh "$ref" -c 'command -v curl && command -v sha256sum && command -v python3 && /opt/llama/llama-server --version 2>&1 | head -1'
               pass "curl + sha256sum + python3 + llama-server present" ;;
