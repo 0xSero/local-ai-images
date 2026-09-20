@@ -173,8 +173,8 @@ jobs:
               # flag, and --help exits 0 only after all preceding flags parsed cleanly. So `<flags> --help`
               # exits 0 iff the choices are ACCEPTED, and errors "invalid choice" first if not. This tests
               # exactly what the baked CMD will do at serve time. No GPU, no model load (help short-circuits).
-              if docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -m sglang.launch_server --model-path /tmp/none --tool-call-parser minicpm5 --reasoning-parser qwen3 --help >/tmp/sgh 2>&1; then
-                pass "launch_server ACCEPTS baked flags --tool-call-parser minicpm5 --reasoning-parser qwen3 (argparse valid)"
+              if docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -m sglang.launch_server --model-path /tmp/none --enable-cache-report --tool-call-parser minicpm5 --reasoning-parser qwen3 --help >/tmp/sgh 2>&1; then
+                pass "launch_server ACCEPTS baked flags --enable-cache-report + --tool-call-parser minicpm5 + --reasoning-parser qwen3 (argparse valid)"
               else
                 echo "::error::launch_server REJECTS the baked parser flags (baked CMD is non-runnable):"
                 grep -iE 'invalid choice|error|usage' /tmp/sgh | head -5
