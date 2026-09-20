@@ -1,9 +1,13 @@
 #!/bin/sh
+# Deploy entrypoint. Canonical interface (Main-approved): env OMP_SSH_FIRST + /opt/omp-acquire.
+#  OMP_SSH_FIRST=1 : exec "$@" immediately (the runner's CONTAINER_STARTUP sshd bootstrap) so
+#                    diagnostic SSH is reachable WITHOUT waiting on any model fetch.
+#  unset (default) : blocking pinned acquisition (/opt/omp-acquire, fail-closed) THEN exec serve.
 set -e
-N="Qwen3.8-27B-AWQ-INT4"; D="/opt/models/$N"
-if [ ! -f "$D/.omp-ready" ]; then
-  echo "[deploy-preflight] snapshot_download cyankiwi/Qwen3.8-27B-AWQ-INT4@63768c10df38c0395e12ef49edac1bd539eaeeea -> $D"
-  timeout 3600 /opt/sglang/bin/python3 -c 'import sys,huggingface_hub as h;h.snapshot_download(sys.argv[1],revision=sys.argv[2],local_dir=sys.argv[3])' "cyankiwi/Qwen3.8-27B-AWQ-INT4" "63768c10df38c0395e12ef49edac1bd539eaeeea" "$D"
-  touch "$D/.omp-ready"
+if [ "${OMP_SSH_FIRST:-0}" = "1" ]; then
+  [ "$#" -ge 1 ] || { echo "[deploy-preflight] OMP_SSH_FIRST=1 requires a command (\$@ is empty)" >&2; exit 2; }
+  echo "[deploy-preflight] OMP_SSH_FIRST=1: exec bootstrap now; run /opt/omp-acquire over SSH before serving"
+  exec "$@"
 fi
+/opt/omp-acquire
 exec /opt/entrypoint.sh "$@"

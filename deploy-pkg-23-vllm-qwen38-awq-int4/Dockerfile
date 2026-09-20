@@ -17,6 +17,7 @@ LABEL ai.omarchy.capabilities.tools="qwen3_xml (landed-recipe evidence)"
 LABEL ai.omarchy.model.served_name="Qwen3.8-27B"
 LABEL ai.omarchy.pinned_startup="vllm serve /opt/models/Qwen3.8-27B-AWQ-INT4 --served-model-name Qwen3.8-27B --tensor-parallel-size 1 --max-model-len 40960 --max-num-seqs 2 --kv-cache-dtype fp8 --gpu-memory-utilization 0.90 --enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3 --trust-remote-code ; env VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0"
 COPY deploy-preflight.sh /opt/deploy-preflight.sh
-RUN chmod 0755 /opt/deploy-preflight.sh
+COPY omp-acquire.sh /opt/omp-acquire
+RUN chmod 0755 /opt/deploy-preflight.sh /opt/omp-acquire
 ENTRYPOINT ["/opt/deploy-preflight.sh"]
 CMD ["vllm", "serve", "/opt/models/Qwen3.8-27B-AWQ-INT4", "--served-model-name", "Qwen3.8-27B", "--tensor-parallel-size", "1", "--max-model-len", "40960", "--max-num-seqs", "2", "--kv-cache-dtype", "fp8", "--gpu-memory-utilization", "0.90", "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml", "--reasoning-parser", "qwen3", "--trust-remote-code"]

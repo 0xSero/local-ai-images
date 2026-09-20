@@ -1,10 +1,14 @@
 #!/bin/sh
+# Deploy entrypoint. Canonical interface (Main-approved): env OMP_SSH_FIRST + /opt/omp-acquire.
+#  OMP_SSH_FIRST=1 : exec "$@" immediately (the runner's CONTAINER_STARTUP sshd bootstrap) so
+#                    diagnostic SSH is reachable WITHOUT waiting on any model fetch.
+#  unset (default) : blocking pinned acquisition (/opt/omp-acquire, fail-closed) THEN exec serve.
 set -e
-N="Qwen3.8-27B-EXL3-SC3bpw-H4-V4"; D="/opt/models/$N"
-if [ ! -f "$D/.omp-ready" ]; then
-  echo "[deploy-preflight] snapshot_download turboderp/Qwen3.8-27B-exl3@004a887127d8304ca2d5475d3a3c41f1761fdd27 -> $D"
-  timeout 3600 python3 -c 'import sys,huggingface_hub as h;h.snapshot_download(sys.argv[1],revision=sys.argv[2],local_dir=sys.argv[3])' "turboderp/Qwen3.8-27B-exl3" "004a887127d8304ca2d5475d3a3c41f1761fdd27" "$D"
-  touch "$D/.omp-ready"
+if [ "${OMP_SSH_FIRST:-0}" = "1" ]; then
+  [ "$#" -ge 1 ] || { echo "[deploy-preflight] OMP_SSH_FIRST=1 requires a command (\$@ is empty)" >&2; exit 2; }
+  echo "[deploy-preflight] OMP_SSH_FIRST=1: exec bootstrap now; run /opt/omp-acquire over SSH before serving"
+  exec "$@"
 fi
+/opt/omp-acquire
 cd /app
 exec python3 main.py

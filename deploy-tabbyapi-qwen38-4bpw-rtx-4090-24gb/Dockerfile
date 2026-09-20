@@ -16,5 +16,6 @@ LABEL ai.omarchy.engine_base_cuda_floor="13.2"
 LABEL ai.omarchy.pinned_startup="tabbyapi config.yml max_seq_len 131072, cache_size 131584, chunk_size 2048"
 COPY config.yml /app/config.yml
 COPY deploy-preflight.sh /opt/deploy-preflight.sh
-RUN chmod 0755 /opt/deploy-preflight.sh
+COPY omp-acquire.sh /opt/omp-acquire
+RUN chmod 0755 /opt/deploy-preflight.sh /opt/omp-acquire
 ENTRYPOINT ["/opt/deploy-preflight.sh"]

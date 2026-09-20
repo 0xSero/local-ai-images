@@ -15,6 +15,7 @@ LABEL ai.omarchy.target_context_tokens="131072"
 LABEL ai.omarchy.engine_base_cuda_floor="13.0"
 LABEL ai.omarchy.pinned_startup="vllm serve --max-model-len 131072 --kv-cache-dtype fp8 --gpu-memory-utilization 0.92 --tool-call-parser qwen3_xml"
 COPY deploy-preflight.sh /opt/deploy-preflight.sh
-RUN chmod 0755 /opt/deploy-preflight.sh
+COPY omp-acquire.sh /opt/omp-acquire
+RUN chmod 0755 /opt/deploy-preflight.sh /opt/omp-acquire
 ENTRYPOINT ["/opt/deploy-preflight.sh"]
 CMD ["vllm", "serve", "/opt/models/Ornith-1.5-9B", "--served-model-name", "Ornith-1.5-9B", "--host", "0.0.0.0", "--port", "8000", "--max-model-len", "131072", "--kv-cache-dtype", "fp8", "--gpu-memory-utilization", "0.92", "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml", "--reasoning-parser", "qwen3", "--default-chat-template-kwargs", "{\"enable_thinking\": true}", "--trust-remote-code"]

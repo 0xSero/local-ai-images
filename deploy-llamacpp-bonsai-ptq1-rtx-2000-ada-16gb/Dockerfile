@@ -20,6 +20,7 @@ LABEL ai.omarchy.pinned_startup="/opt/llama/llama-server --model /opt/models/Ter
 LABEL ai.omarchy.model.sha256.ptq1="53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3"
 LABEL ai.omarchy.model.sha256.mmproj="6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903"
 COPY deploy-preflight.sh /opt/deploy-preflight.sh
-RUN chmod 0755 /opt/deploy-preflight.sh
+COPY omp-acquire.sh /opt/omp-acquire
+RUN chmod 0755 /opt/deploy-preflight.sh /opt/omp-acquire
 ENTRYPOINT ["/opt/deploy-preflight.sh"]
 CMD ["/opt/llama/llama-server", "--model", "/opt/models/Ternary-Bonsai-2-27B/Ternary-Bonsai-2-27B-PTQ1_0.gguf", "--mmproj", "/opt/models/Ternary-Bonsai-2-27B/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf", "--alias", "Ternary-Bonsai-2-27B-PTQ1_0", "--host", "0.0.0.0", "--port", "8080", "--ctx-size", "131072", "--cache-type-k", "q4_0", "--cache-type-v", "q4_0", "--n-gpu-layers", "99", "--jinja"]

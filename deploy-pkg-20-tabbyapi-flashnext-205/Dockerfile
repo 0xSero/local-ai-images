@@ -15,5 +15,6 @@ LABEL ai.omarchy.mtp="off"
 LABEL ai.omarchy.pinned_startup="model_name Qwen3.8-Flash-Next-EXL3-205bpw-H4 max_seq_len 262144 cache_size 262656 chunk_size 2048 draft_mode none"
 COPY config.yml /app/config.yml
 COPY deploy-preflight.sh /opt/deploy-preflight.sh
-RUN chmod 0755 /opt/deploy-preflight.sh
+COPY omp-acquire.sh /opt/omp-acquire
+RUN chmod 0755 /opt/deploy-preflight.sh /opt/omp-acquire
 ENTRYPOINT ["/opt/deploy-preflight.sh"]

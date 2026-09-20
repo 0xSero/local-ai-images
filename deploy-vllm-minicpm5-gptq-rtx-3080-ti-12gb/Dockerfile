@@ -18,6 +18,7 @@ LABEL ai.omarchy.pinned_startup.note="actual baked CMD; DELIVERY --enable-auto-t
 LABEL ai.omarchy.pinned_startup="vllm serve /opt/models/MiniCPM5-2B-GPTQ --served-model-name MiniCPM5-2B-GPTQ --host 0.0.0.0 --port 8000 --max-model-len 131072 --kv-cache-dtype fp8 --gpu-memory-utilization 0.92 --trust-remote-code"
 LABEL ai.omarchy.capabilities.tools="engine-unsupported"
 COPY deploy-preflight.sh /opt/deploy-preflight.sh
-RUN chmod 0755 /opt/deploy-preflight.sh
+COPY omp-acquire.sh /opt/omp-acquire
+RUN chmod 0755 /opt/deploy-preflight.sh /opt/omp-acquire
 ENTRYPOINT ["/opt/deploy-preflight.sh"]
 CMD ["vllm", "serve", "/opt/models/MiniCPM5-2B-GPTQ", "--served-model-name", "MiniCPM5-2B-GPTQ", "--host", "0.0.0.0", "--port", "8000", "--max-model-len", "131072", "--kv-cache-dtype", "fp8", "--gpu-memory-utilization", "0.92", "--trust-remote-code"]
