@@ -167,14 +167,21 @@ jobs:
               # execs our passed command (which verifies the marker). No GPU, no server launch.
               docker run --rm "$ref" sh -c 'set -e; ls -la /opt/models/MiniCPM5-2B-GPTQ >/dev/null; test -s /opt/models/MiniCPM5-2B-GPTQ/config.json; test -f /opt/models/MiniCPM5-2B-GPTQ/.omp-ready; echo PREFLIGHT_MARKER_OK'
               pass "ENTRYPOINT preflight resolved pinned model to /opt/models/MiniCPM5-2B-GPTQ + wrote .omp-ready (CPU, 0 GPU)"
-              # Tokenizer availability (BenchmarkRepair): the bench client must use the model's OWN
-              # AutoTokenizer / native chat template on the pod, not an assumed /tokenize route.
-              docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -c "import transformers; from transformers import AutoTokenizer; print('transformers', transformers.__version__, 'AutoTokenizer OK')"
+              # Tokenizer availability (BenchmarkRepair/Main): the bench client builds prompts with the
+              # model's OWN local AutoTokenizer on the pod (SGLang has no /tokenize). Main default is
+              # trust_remote_code=False; flag if the pinned model needs True. local_files_only=True = no net.
+              docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -c "import transformers; from transformers import AutoTokenizer; print('transformers', transformers.__version__)"
               pass "transformers + AutoTokenizer importable in-image"
-              # After the preflight fetch, the model dir must carry its tokenizer + chat template, and
-              # AutoTokenizer.from_pretrained must load it locally (no network, no pip overlay).
-              docker run --rm "$ref" sh -c 'ls /opt/models/MiniCPM5-2B-GPTQ/ | grep -iE "tokenizer|vocab|merges|special_tokens|chat_template" | tee /tmp/tk; test -s /tmp/tk; /opt/sglang/bin/python3 -c "from transformers import AutoTokenizer; t=AutoTokenizer.from_pretrained(\"/opt/models/MiniCPM5-2B-GPTQ\", trust_remote_code=True); print(\"TOKENIZER_LOADED vocab_size=\"+str(getattr(t,\"vocab_size\",\"?\"))+\" chat_template=\"+(\"yes\" if getattr(t,\"chat_template\",None) else \"no\"))'
-              pass "model dir carries tokenizer files + AutoTokenizer.from_pretrained loads locally"
+              docker run --rm "$ref" sh -c 'ls /opt/models/MiniCPM5-2B-GPTQ/ | grep -iE "tokenizer|vocab|merges|special_tokens|chat_template" | tee /tmp/tk; test -s /tmp/tk; echo TOKENIZER_FILES_PRESENT'
+              pass "mounted model dir carries tokenizer + chat_template files"
+              if docker run --rm "$ref" /opt/sglang/bin/python3 -c "from transformers import AutoTokenizer as A; t=A.from_pretrained('/opt/models/MiniCPM5-2B-GPTQ', local_files_only=True, trust_remote_code=False); print('TRC_FALSE_OK vocab_size='+str(getattr(t,'vocab_size','?'))+' chat_template='+('yes' if getattr(t,'chat_template',None) else 'no'))" >/tmp/tok 2>&1; then
+                cat /tmp/tok; pass "AutoTokenizer loads local_files_only=True trust_remote_code=False (Main default)"
+              else
+                echo "- trust_remote_code=False failed:" >> "$GITHUB_STEP_SUMMARY"; tail -3 /tmp/tok >> "$GITHUB_STEP_SUMMARY"
+                docker run --rm "$ref" /opt/sglang/bin/python3 -c "from transformers import AutoTokenizer as A; t=A.from_pretrained('/opt/models/MiniCPM5-2B-GPTQ', local_files_only=True, trust_remote_code=True); print('NEEDS_TRC_TRUE vocab_size='+str(getattr(t,'vocab_size','?')))"
+                echo "::warning::FLAG: MiniCPM5 tokenizer requires trust_remote_code=True (Main to review before the bench client enables it)"
+                echo "- FLAG: tokenizer needs trust_remote_code=True" >> "$GITHUB_STEP_SUMMARY"
+              fi
               # The baked CMD passes explicit --tool-call-parser minicpm5 --reasoning-parser qwen3.
               # sglang's --help does NOT enumerate plugin parsers, so grepping help is a false-negative.
               # Authoritative test: launch_server's argparse validates a choice when it consumes the
