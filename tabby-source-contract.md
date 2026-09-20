@@ -1,0 +1,41 @@
+# TabbyAPI source contract — bound to immutable image digests (parity-only)
+
+These bind the ACTUAL installed TabbyAPI source (read from the pinned image via `docker create` +
+`docker cp /app`, no weights, no GPU) to the immutable image digest. This is a SOURCE/tokenizer-parity
+contract — it is NOT proof of server usage==sent, which needs a real /v1/completions request adapter
+on the exact source at rental (BenchmarkRepair/Opus).
+
+## cu12 — deploy-tabbyapi-qwen38-2bpw-rtx-3080-ti-12gb @ sha256:47c4c6eb402267cd8d70b2954111cc37214887afa7168c2759b6cd73f93f8623
+- Source-bundle artifact: `tabby-source-deploy-tabbyapi-qwen38-2bpw-rtx-3080-ti-12gb` (244 KB, source only), run 35517774025 (SUCCESS), artifact id 10607062924.
+  Fetch: `gh api repos/0xSero/local-ai-images/actions/artifacts/10607062924/zip > s.zip && unzip s.zip`
+- Commit provenance (no guess): tabbyapi-0.0.1 dist-info direct_url.json = `{"url":"file:///app"}` — local install,
+  NOT a git checkout, so NO recoverable commit_id. In-image source BYTES are authoritative; compare to 53da7919 by content.
+  exllamav3 dist-info direct_url.json = release wheel `.../v1.5.0/exllamav3-1.5.0+cu128.torch2.9.0-cp312-cp312-linux_x86_64.whl` (provably v1.5.0, cu128, torch2.9.0).
+- Contract-file sha256 (bound to @47c4c6eb):
+  - common/errors.py            = a5f6db04b928a904edea5415dd6011ce5407541980aac2767b5679d5eab820ad
+  - endpoints/OAI/types/completion.py = b8b672299e550a38ee25394e116acf43f22e4343e68150cd95e2445c427f59cb
+  - common/sampling.py          = f39e831f40aee7a22cc0098d2d2e7ac74814045e535eedeef5dd828a247e8c2b
+  - common/config_models.py     = 49eb7b9f6d5fd7aff83ba5b54d80b8b60b127bdd5ebca04dee5694d746e92034
+  - common/tabby_config.py      = 98ed3b609bd48740c8acc24d20cefa9820f66aeef66847470e1fed4e4d206d43
+  - backends/exllamav3/model.py = 2d9308a34852d6c5d6786b96ffacd6eda4dbfb5e3946cb4b6880b9ee72020176
+  - backends/exllamav3/tokenizer.py = ABSENT (exllamav3 tokenizer lives in the exllamav3 wheel, not tabby backends)
+- Contract fields (line-cited from the bundle):
+  - CompletionRequest: endpoints/OAI/types/completion.py:57 `class CompletionRequest(CommonCompletionRequest)`
+  - add_bos_token: default True (endpoints/core/types/token.py:13); chat-completions FORCE off
+    (endpoints/OAI/types/chat_completion.py:167 `@field_validator("add_bos_token", mode="after")` "Always disable
+    add_bos_token with chat completions") + double-BOS guard (chat_completion.py:529)
+  - ignore_eos: ALIAS of ban_eos_token — common/sampling.py:249 `validation_alias=AliasChoices("ban_eos_token","ignore_eos")`
+  - validate_context_requirements: common/errors.py:40
+  - exllamav3 encode passes bos through: backends/exllamav3/model.py:916 `add_bos=unwrap(kwargs.get("add_bos_token"), self.hf_model.add_bos_token())`
+
+## cu13 — deploy-tabbyapi-qwen38-4bpw-rtx-4090-24gb @ sha256:80f9e2befda50e4bb1c0ae6797a39f1cf285b54f2a519458095167bb0562bd65
+- Source-bundle artifact `tabby-source-deploy-tabbyapi-qwen38-4bpw-rtx-4090-24gb` (244 KB), run 35518118820 (SUCCESS), artifact id 10607921308.
+- tabby dist-info direct_url.json = `{"url":"file:///app"}` (local install, no git — same as cu12). exllamav3 = release wheel v1.5.0+cu132.torch2.11.0.
+- cu13 commit == 53da7919 from the 09-18 engine.json provenance (accepted by BenchmarkRepair).
+
+## Content-equivalence cu12 vs cu13 (closes cu12 commit-unconfirmed by CONTENT)
+All six TabbyAPI contract files are BYTE-IDENTICAL across cu12 (@47c4c6eb) and cu13 (@80f9e2be):
+errors.py=a5f6db04, endpoints/OAI/types/completion.py=b8b67229, sampling.py=f39e831f,
+config_models.py=49eb7b9f, tabby_config.py=98ed3b60, backends/exllamav3/model.py=2d9308a3.
+=> cu12 tabby source == cu13 tabby source == 53da7919 by content. Only difference is the exllamav3
+build (cu12 cu128.torch2.9.0 vs cu13 cu132.torch2.11.0; same exllamav3 release v1.5.0).
