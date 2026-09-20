@@ -1,0 +1,9 @@
+# Pinned deploy config for R15 -> ghcr.io/0xsero/deploy-tabbyapi-qwen38-4bpw-rtx-3090-24gb:v1
+# Generated from DELIVERY-24.json pinned_startup by ImageDelivery. Build-status only; runtime untested.
+# Model (fetched by the recipe/bootstrap into model_dir, NOT baked): turboderp/Qwen3.8-27B-exl3@4acd9ad5af224ec9e8815a54d71a033f378a7e9d branch SC_4.00bpw_H5
+model:
+  model_dir: /models
+  model_name: Qwen3.8-27B-exl3_SC_4.00bpw_H5
+  max_seq_len: 262144
+  cache_size: 263168
+  chunk_size: 2048

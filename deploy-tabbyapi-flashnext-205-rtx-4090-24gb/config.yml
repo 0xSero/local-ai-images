@@ -1,0 +1,11 @@
+# Pinned deploy config for R16 -> ghcr.io/0xsero/deploy-tabbyapi-flashnext-205-rtx-4090-24gb:v1
+# Generated from DELIVERY-24.json pinned_startup by ImageDelivery. Build-status only; runtime untested.
+# Model (fetched by the recipe/bootstrap into model_dir, NOT baked): turboderp/Qwen3.8-Flash-Next-exl3@65c895314393431c09050b2e04e250836b3a6eb4 branch 2.05bpw_h4_ng4
+model:
+  model_dir: /models
+  model_name: Qwen3.8-Flash-Next-exl3_2.05bpw_h4_ng4
+  max_seq_len: 131072
+  cache_size: 131584
+  # extras mirror ExperimentAudit pinned_startup for the Flash-Next/MTP rows
+  cpu_moe_split_experts: 128
+  ngram_ram: true
