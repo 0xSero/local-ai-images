@@ -162,10 +162,14 @@ jobs:
             echo "- digest verified: \`${{ inputs.digest }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: CPU import + parser/flag checks (fail-closed)
+        env:
+          IMAGE: ${{ inputs.image }}
+          DIGEST: ${{ inputs.digest }}
+          ENGINE: ${{ inputs.engine }}
         run: |
           set -euo pipefail
-          ref="ghcr.io/0xsero/${{ inputs.image }}@${{ inputs.digest }}"
-          e="${{ inputs.engine }}"
+          ref="ghcr.io/0xsero/${IMAGE}@${DIGEST}"
+          e="${ENGINE}"
           pass(){ echo "- $1: PASS" >> "$GITHUB_STEP_SUMMARY"; }
           case "$e" in
             sglang)
@@ -333,7 +337,7 @@ jobs:
               {
                 echo "### dist-info direct_url + METADATA (real pip source/commit, no guess)"
                 for f in "$OUT"/*direct_url.json "$OUT"/*METADATA; do [ -f "$f" ] && { echo "-- $(basename "$f")"; cat "$f"; echo; }; done
-                echo "### contract file sha256 (bound to this image digest ${{ inputs.digest }})"
+                echo "### contract file sha256 (bound to this image digest ${DIGEST})"
                 for f in common/errors.py endpoints/OAI/types/completion.py common/sampling.py common/config_models.py common/tabby_config.py backends/exllamav3/model.py backends/exllamav3/tokenizer.py; do p="$APP/$f"; [ -f "$p" ] && echo "SHA256 $f = $(sha256sum "$p" | cut -d' ' -f1)" || echo "ABSENT $f"; done
                 echo "### contract fields (grep of the installed source)"
                 echo '```'
