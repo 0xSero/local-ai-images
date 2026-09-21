@@ -10,7 +10,15 @@ if [ -f "$D/.omp-ready" ] && [ "$(cat "$D/.omp-ready" 2>/dev/null)" = "$REV" ]; 
   log "model already at pinned revision $REV"; exit 0
 fi
 log "acquiring $REPO@$REV -> $D"; rm -f "$D/.omp-ready"
-if timeout "${OMP_ACQUIRE_TIMEOUT:-3600}" python3 -c \
+# huggingface_hub lives in the image's own virtualenv, not in the system
+# interpreter, so resolve an interpreter that can import it and fail
+# closed if none can (the venv path is not on PATH by default).
+PY=""
+for cand in /opt/venv/bin/python3 /opt/sglang/bin/python3 /opt/vllm/bin/python3 python3; do
+  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import huggingface_hub' 2>/dev/null; then PY="$cand"; break; fi
+done
+[ -n "$PY" ] || { log "no interpreter in this image can import huggingface_hub (fail-closed)"; exit 3; }
+if timeout "${OMP_ACQUIRE_TIMEOUT:-3600}" "$PY" -c \
     'import sys,huggingface_hub as h;h.snapshot_download(sys.argv[1],revision=sys.argv[2],local_dir=sys.argv[3])' \
     "$REPO" "$REV" "$D" >/tmp/omp-acquire.out 2>&1; then
   cat /tmp/omp-acquire.out; cat /tmp/omp-acquire.out >>"$LOG" 2>/dev/null || true
