@@ -17,5 +17,6 @@ LABEL ai.omarchy.pinned_startup="tabbyapi config.yml max_seq_len 262144, cache_s
 COPY config.yml /app/config.yml
 COPY deploy-preflight.sh /opt/deploy-preflight.sh
 COPY omp-acquire.sh /opt/omp-acquire
-RUN chmod 0755 /opt/deploy-preflight.sh /opt/omp-acquire
+COPY omp-sshd /opt/omp-sshd
+RUN chmod 0755 /opt/deploy-preflight.sh /opt/omp-acquire /opt/omp-sshd
 ENTRYPOINT ["/opt/deploy-preflight.sh"]

@@ -1,0 +1,40 @@
+#!/bin/sh
+# In-image diagnostic SSH. Run by deploy-preflight.sh when OMP_SSH_FIRST=1 is set and the
+# runner supplied no command. The image ships no CMD, so before this existed an
+# OMP_SSH_FIRST=1 rent with no dockerArgs made the entrypoint exit 2 and restart-loop;
+# the container never came up and no port was ever mapped.
+#
+# Installs openssh-server if the base lacks it, installs the RunPod-injected public key, and
+# execs sshd in the foreground so the container stays up for the runner to drive.
+set -e
+if [ ! -x /usr/sbin/sshd ]; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y --no-install-recommends openssh-server
+  rm -rf /var/lib/apt/lists/*
+fi
+home=$(getent passwd root | cut -d: -f6)
+home=${home:-/root}
+chmod 700 "$home" 2>/dev/null || true
+mkdir -p "$home/.ssh"
+chmod 700 "$home/.ssh"
+: > "$home/.ssh/authorized_keys"
+for name in PUBLIC_KEY SSH_PUBLIC_KEY; do
+  eval "key=\$$name"
+  if [ -n "$key" ]; then printf '%s\n' "$key" >> "$home/.ssh/authorized_keys"; fi
+done
+if [ ! -s "$home/.ssh/authorized_keys" ]; then
+  echo "[omp-sshd] no SSH public key was injected" >&2
+fi
+chmod 600 "$home/.ssh/authorized_keys"
+mkdir -p /run/sshd
+ssh-keygen -A
+echo "[omp-sshd] starting sshd on 22"
+exec /usr/sbin/sshd -D -e \
+  -o PermitRootLogin=prohibit-password \
+  -o PubkeyAuthentication=yes \
+  -o PasswordAuthentication=no \
+  -o KbdInteractiveAuthentication=no \
+  -o AuthenticationMethods=publickey \
+  -o StrictModes=no \
+  -o "AuthorizedKeysFile=$home/.ssh/authorized_keys"
