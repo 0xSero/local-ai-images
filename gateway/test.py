@@ -125,7 +125,9 @@ def main():
     threading.Thread(target=engine.serve_forever, daemon=True).start()
     key_file = tempfile.NamedTemporaryFile("w", delete=False)
     key_file.write(KEY + "\n"); key_file.close()
-    env = dict(os.environ, UPSTREAM=f"http://127.0.0.1:{ENGINE_PORT}", GATEWAY_PORT=str(GATEWAY_PORT), GATEWAY_KEY_FILE=key_file.name, MODEL="fake-model")
+    usage_log = os.path.join(tempfile.mkdtemp(), "usage.jsonl")
+    env = dict(os.environ, UPSTREAM=f"http://127.0.0.1:{ENGINE_PORT}", GATEWAY_PORT=str(GATEWAY_PORT), GATEWAY_KEY_FILE=key_file.name, MODEL="fake-model",
+               GATEWAY_USAGE_LOG=usage_log)
     gateway = subprocess.Popen([sys.executable, os.path.join(HERE, "gateway.py")], env=env, stderr=subprocess.PIPE)
     try:
         for _ in range(50):
@@ -228,6 +230,13 @@ def main():
             check(f"{path}: image URL preserved", status == 200 and image["url"] == "https://example.com/image.png" and (path.endswith("messages") or image["detail"] == "low"))
         status, body = call("/v1/responses", {"model": "test", "input": [{"role": "user", "content": [{"type": "input_image", "file_id": "unavailable"}]}]})
         check("unsupported image reference fails explicitly", status == 400 and body["error"]["type"] == "invalid_request_error")
+        # usage log: one line per answered request, tokens from the engine's usage block
+        time.sleep(0.2)
+        rows = [json.loads(line) for line in open(usage_log)]
+        apis = {row["api"] for row in rows}
+        check("usage log: every dialect is recorded", apis == {"chat", "messages", "responses"}, str(apis))
+        check("usage log: engine usage is used verbatim", all(row["completion"] == 4 and row["prompt"] == 10 and not row["estimated"] for row in rows), str(rows[:3]))
+        check("usage log: model, timing and time-to-first-token are present", all(row["model"] == "fake-model" and row["ms"] >= row["ttft_ms"] >= 0 for row in rows), str(rows[:1]))
         print(f"# {passed} passed")
     finally:
         gateway.terminate()
