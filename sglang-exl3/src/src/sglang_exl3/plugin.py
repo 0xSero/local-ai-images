@@ -23,7 +23,40 @@ def activate() -> None:
     if "exl3" not in QUANTIZATION_CHOICES:
         add_quantization_method_choices(["exl3"])
     _patch_mtp_fc()
+    if os.environ.get("SGLANG_EXL3_EMBED_HOST", "0") == "1":
+        _patch_host_embedding()
     logger.info("sglang-exl3: registered quantization method 'exl3'")
+
+
+HOST_EMBEDS: list = []
+
+
+def _patch_host_embedding() -> None:
+    """SGLANG_EXL3_EMBED_HOST=1: keep the target's bf16 token embedding (2.5 GB on Qwen3.8-27B) in pinned host memory and
+    gather rows over PCIe (SGLang's own pinned-host embedding from qwen4_exp, Triton gather, CUDA-graph safe). Decode reads
+    a few 10 KB rows per step; the freed VRAM goes to the KV pool (~80k fp8 tokens on the 27B). The MTP draft shares it."""
+    from sglang.srt.models import qwen3_5 as q
+    from sglang.srt.models.qwen4_exp import Qwen4ExpPinnedHostEmbedding
+    from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
+    cls = q.Qwen3_5ForCausalLM
+    if getattr(cls, "_exl3_host_embed", False):
+        return
+    orig = cls._build_embed_tokens
+
+    def _build_embed_tokens(self, config):
+        emb = orig(self, config)
+        if not isinstance(emb, VocabParallelEmbedding):
+            return emb
+        if HOST_EMBEDS:              # the MTP draft (built second): reuse the target's host table later
+            return emb
+        emb.weight_scale = None
+        host = Qwen4ExpPinnedHostEmbedding(emb, backend="pinned")
+        HOST_EMBEDS.append(host)
+        logger.info("sglang-exl3: token embedding %s kept in pinned host memory (%.2f GB)",
+                    tuple(host.weight.shape), host.weight.numel() * host.weight.element_size() / 2**30)
+        return host
+
+    cls._build_embed_tokens, cls._exl3_host_embed = _build_embed_tokens, True
 
 
 def _patch_mtp_fc() -> None:
@@ -76,6 +109,10 @@ def _patch_mtp_fc() -> None:
     orig_set = cls.set_embed_and_head
 
     def set_embed_and_head(self, embed, head):
+        if embed is not None and not embed.is_cuda and HOST_EMBEDS:
+            # target embedding lives in host memory: share the target's pinned-embedding module with the draft
+            self.model.embed_tokens = HOST_EMBEDS[0]
+            embed = None
         orig_set(self, embed, head)
         if head is not None and head.dim() == 2 and head.shape[1] == 0:
             _install_hot_head(self)

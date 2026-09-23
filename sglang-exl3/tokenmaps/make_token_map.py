@@ -1,6 +1,5 @@
 """Hot-token list for the MTP draft head: the N most frequent tokens of the served tokenizer over UltraChat test_sft
-(English chat, assistant turns weighted x2), Python stdlib sources and SGLang docs, plus every special/added token and
-every byte-level single-character token. Output: torch list file for --speculative-token-map."""
+(English chat, assistant turns weighted x2), Python stdlib sources and SGLang docs, plus every special/added token. Output: torch list file for --speculative-token-map."""
 import glob, os, sys, collections, torch
 import pyarrow.parquet as pq
 from transformers import AutoTokenizer
@@ -25,7 +24,6 @@ print("corpus tokens", sum(cnt.values()), "distinct", len(cnt), flush=True)
 hot = [i for i, _ in cnt.most_common(n)]
 must = set(tok.all_special_ids) | {v for k, v in tok.get_added_vocab().items()}
 vocab = tok.get_vocab()
-must |= {i for s, i in vocab.items() if len(tok.convert_tokens_to_string([s])) <= 1}
 hs = set(hot)
 extra = [i for i in sorted(must) if i not in hs]
 hot = hot[: n - len(extra)] + extra
