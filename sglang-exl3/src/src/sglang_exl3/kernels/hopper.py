@@ -1,8 +1,9 @@
 """Hopper backend: our Marlin-template EXL3 kernels (csrc/, module `aikido_exl3_kernels`).
 
-K = 4 and K = 6 (lm_head), codebooks MCG and MUL1. Decoded weights are bit-identical to ExLlamaV3's (parity/); the
-accumulation order differs. The trellis is repacked once at load into a lane-major layout: K = 4 a pure permutation
-of the stream words, K = 6 a lossless bit re-layout (each lane's 64-bit window, 16 bits stored twice).
+K = 3, K = 4 and K = 6 (lm_head), codebooks MCG and MUL1. Decoded weights are bit-identical to ExLlamaV3's (parity/);
+the accumulation order differs. The trellis is repacked once at load: K = 4 a pure permutation of the stream words into
+a lane-major layout, K = 6 a lossless bit re-layout (each lane's 64-bit window, 16 bits stored twice), K = 3 the tiles
+exactly as stored ([k/16, n/64, 4, 24] int32; the kernel stages them byte-exact, notes/k3-dense-plan.md).  # K3
 
 Activations may be fp16 or bf16. The GEMM always runs on fp16 (ExLlamaV3 semantics); with bf16 the two conversions
 happen inside the Hadamard launches and are exactly torch's `.to(float16)` / `.to(bfloat16)` value conversions
@@ -47,8 +48,8 @@ def probe() -> BackendStatus:
 
 
 def supports(trellis: list[torch.Tensor], out_widths: list[int], codebooks: list[int]) -> tuple[bool, str]:
-    if len({t.shape[2] for t in trellis}) != 1 or trellis[0].shape[2] not in (64, 96):
-        return False, "one bitrate per group, K=4 or K=6"
+    if len({t.shape[2] for t in trellis}) != 1 or trellis[0].shape[2] not in (48, 64, 96):   # K3
+        return False, "one bitrate per group, K=3, K=4 or K=6"
     if any((t.shape[0] * 16) % 128 or (t.shape[1] * 16) % 128 for t in trellis):
         return False, "k, n not multiples of 128"
     if len(set(codebooks)) != 1 or codebooks[0] not in (1, 2):
@@ -61,7 +62,8 @@ def supports(trellis: list[torch.Tensor], out_widths: list[int], codebooks: list
 
 
 def prepare(trellis: list[torch.Tensor], suh: list[torch.Tensor], svh: list[torch.Tensor]):
-    """-> (b_cat int32 [k/16, n_total/64, 32, 4(, 2)], suh_cat [shards, k], svh_cat [n_total], shard_ends)"""
+    """-> (b_cat int32 [k/16, n_total/64, 32, 4(, 2)] (K=4, K=6) | [k/16, n_total/64, 4, 24] (K3), suh_cat [shards, k],
+    svh_cat [n_total], shard_ends)"""
     mod = _load()
     mod.init_device(trellis[0].device.index)       # per-device state must exist before any CUDA-graph capture
     b = torch.cat([mod.repack_trellis(t) for t in trellis], dim=1).contiguous()
@@ -127,16 +129,17 @@ def set_in_had_inlaunch(on: bool) -> None:
 
 def supports_matrix(trellis: torch.Tensor) -> tuple[bool, str]:
     k, n = trellis.shape[0] * 16, trellis.shape[1] * 16
-    if trellis.shape[2] not in (64, 96):
-        return False, f"K = {trellis.shape[2] / 16:g} (only K = 4 and K = 6)"
+    if trellis.shape[2] not in (48, 64, 96):   # K3
+        return False, f"K = {trellis.shape[2] / 16:g} (only K = 3, 4 and 6)"
     if k % 128 or n % 128:
         return False, f"k, n = {k}, {n} not multiples of 128"
     return True, ""
 
 
 def prepare_matrix(trellis: torch.Tensor) -> torch.Tensor:
-    """int16 (k/16, n/16, 16K) -> int32 (k/16, n/64, 32, 4) for K=4 (same stream words, lane-major order) or
-    (k/16, n/64, 32, 4, 2) for K=6 (per lane and tile the 64 stream bits its 8 windows live in)."""
+    """int16 (k/16, n/16, 16K) -> int32 (k/16, n/64, 32, 4) for K=4 (same stream words, lane-major order),
+    (k/16, n/64, 32, 4, 2) for K=6 (per lane and tile the 64 stream bits its 8 windows live in) or
+    (k/16, n/64, 4, 24) for K=3 (the tiles as stored, K3)."""
     mod = _load()
     mod.init_device(trellis.device.index)
     return mod.repack_trellis(trellis)

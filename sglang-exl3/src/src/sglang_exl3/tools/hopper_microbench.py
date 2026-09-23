@@ -6,7 +6,7 @@
 Columns (us per call): exl3 = exllamav3_ext.exl3_gemm as the plugin calls it (its own dispatch: int8 GEMV at
 rows <= 2, fp16 GEMV to 8 rows, tuned GEMM above); hopper = full linear of our kernel (both Hadamards included);
 gemm = our GEMM launch alone (rotated basis); marlin = vLLM AWQ-Marlin g32 on random weights of the same shape.
-Per-step totals multiply by the number of such linears in the checkpoint (K=4 classes the kernel supports; the
+Per-step totals multiply by the number of such linears in the checkpoint (K=3/4/6 classes the kernel supports; the
 others are listed and counted with ExLlamaV3's time in both totals).
 
 `--step` measures a decode step the way an engine runs it: q/k/v, gate/up and GDN qkv/z of a layer are fused groups
@@ -65,7 +65,8 @@ def step_bench(args, man) -> int:
             if key.endswith(grp[0]):
                 gkeys = tuple(key[: -len(grp[0])] + g for g in grp)
                 specs = [man.matrices.get(g) for g in gkeys]
-                if all(s is not None and s.bits.value == 4 and s.k % 128 == 0 and s.n % 128 == 0 for s in specs):  # K=6: lm_head only
+                if (all(s is not None and s.bits.value in (3, 4) and s.k % 128 == 0 and s.n % 128 == 0 for s in specs)   # K3
+                        and len({s.bits.value for s in specs}) == 1):  # K=6: lm_head only; one K per fused group
                     units[("group", specs[0].k, tuple(s.n for s in specs), specs[0].codebook.value)].append(gkeys)
                     grouped.update(gkeys)
     for key in keys:

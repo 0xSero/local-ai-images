@@ -25,7 +25,7 @@ One tensor per (k, n, K, codebook) class the kernel supports. Three checks each:
  (e) bf16 boundary: `linear(x_bf16) -> bf16` must equal `linear(x_bf16.half()).bfloat16()` BIT FOR BIT (NaN-aware),
      on normal inputs and on bf16 inputs beyond the fp16 range (they become inf exactly as torch's cast makes them).
 
-K = 4 and K = 6 (lm_head) classes. Fused groups (q/k/v, gate/up, GDN qkv/z: one launch for several matrices that share the input) get the same three
+K = 3 (K3), K = 4 and K = 6 (lm_head) classes. Fused groups (q/k/v, gate/up, GDN qkv/z: one launch for several matrices that share the input) get the same three
 checks (`--no-groups` skips them): the decoded weights of every shard through the fused launch, outputs against
 float64 and against ExLlamaV3's per-matrix kernels, graph replay.
 """
@@ -332,7 +332,7 @@ def main(argv=None) -> int:
     else:
         classes = defaultdict(list)
         for key, m in man.matrices.items():
-            if not any(s in key for s in args.skip) and m.bits.value in (4, 6) and m.k % 128 == 0 and m.n % 128 == 0:
+            if not any(s in key for s in args.skip) and m.bits.value in (3, 4, 6) and m.k % 128 == 0 and m.n % 128 == 0:   # K3
                 classes[(m.k, m.n, m.bits.value, m.codebook.value)].append(key)
         keys = [v[len(v) // 2] for _, v in sorted(classes.items())]
     doc = {"torch": torch.__version__, "gpu": torch.cuda.get_device_name(0),
@@ -365,8 +365,10 @@ def main(argv=None) -> int:
                 prefix = key[: -len(grp[0])]
                 gkeys = [prefix + g for g in grp]
                 specs = [man.matrices.get(g) for g in gkeys]
-                if any(s is None for s in specs) or any(s.bits.value != 4 or s.n % 128 or s.k % 128 for s in specs):
-                    continue
+                if any(s is None for s in specs) or any(s.bits.value not in (3, 4) or s.n % 128 or s.k % 128 for s in specs):
+                    continue   # K3: fused groups at K = 3 or 4
+                if len({s.bits.value for s in specs}) != 1:
+                    continue   # K3: one bitrate per fused group
                 seen.add(grp)
                 res = check_group(args.model_dir, gkeys, man, [c for c in args.chunks if c in (8, 16, 64)])
                 doc["groups"].append(res)

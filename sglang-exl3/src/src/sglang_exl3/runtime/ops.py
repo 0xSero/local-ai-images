@@ -58,11 +58,15 @@ def _linear(x: torch.Tensor, trellis: list[torch.Tensor], suh: list[torch.Tensor
     Each matrix has its own input scales, bitrate and codebook, so they are launched one by one."""
     k = (trellis[0].shape[0] if trellis else hopper_w[0].shape[0]) * 16
     rows = x.reshape(-1, x.shape[-1])
-    if hopper_w and not trellis:
-        # memory-lean layout (3090): only the repacked form is resident; rebuild int16 trellis per shard on demand
+
+    def _unpacked():
+        # memory-lean layout (3090): only the repacked form is resident; rebuild the int16 trellis per shard on demand.
+        # Only for the many-row (prefill) path: never on the decode path (an 80 MB copy per group per step).
+        if trellis:
+            return trellis
         b = hopper_w[0]
         bounds = [0, *[e // 64 for e in hopper_ends], b.shape[1]]
-        trellis = [hopper.unprepare_matrix(b[:, a:c].contiguous()) for a, c in zip(bounds[:-1], bounds[1:])]
+        return [hopper.unprepare_matrix(b[:, a:c].contiguous()) for a, c in zip(bounds[:-1], bounds[1:])]
     if (hopper_w and rows.shape[0] < (HOPPER_DENSE_CACHED_ROWS if dense else HOPPER_DENSE_ROWS) and rows.shape[1] == k
             and rows.dtype in (torch.float16, torch.bfloat16)):
         # Our Marlin-template kernel: one launch set for the whole fused group, written straight into the fused
@@ -78,8 +82,9 @@ def _linear(x: torch.Tensor, trellis: list[torch.Tensor], suh: list[torch.Tensor
         out = torch.empty((rows.shape[0], sum(out_widths)), dtype=x.dtype, device=x.device)
         ends = [0, *hopper_ends, out.shape[1]]
         svs = [hopper_w[2][a:b] for a, b in zip(ends[:-1], ends[1:])]
-        dense_group(rows.contiguous(), trellis, hopper_w[1], svs, codebooks[0], out, dense if dense else None)
+        dense_group(rows.contiguous(), _unpacked(), hopper_w[1], svs, codebooks[0], out, dense if dense else None)
         return out.view(*x.shape[:-1], out.shape[1])
+    trellis = _unpacked()          # remaining paths (padded input width, fp32 caller, huge outputs) need the int16 form
     h = rows.to(torch.float16)
     if h.shape[1] < k:                               # stored input width is padded to 128
         h = torch.nn.functional.pad(h, (0, k - h.shape[1]))
