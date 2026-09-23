@@ -560,7 +560,12 @@ class Handler(BaseHTTPRequestHandler):
                     body["tools"] = scrub_schema(body["tools"])
                 if MODEL_ALIAS:
                     body["model"] = MODEL_ALIAS
-                return self.passthrough("POST", "/v1/chat/completions", body)
+                hide = False
+                if USAGE_LOG and body.get("stream"):  # ask the engine for its token counts; the client sees them only if it asked
+                    options = body.get("stream_options") if isinstance(body.get("stream_options"), dict) else {}
+                    hide = not options.get("include_usage")
+                    body["stream_options"] = dict(options, include_usage=True)
+                return self.passthrough("POST", "/v1/chat/completions", body, hide)
             if path in ("/v1/messages", "/messages"):
                 return self.handle_messages(body)
             if path in ("/v1/messages/count_tokens", "/messages/count_tokens"):
@@ -577,30 +582,41 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(502, {"error": {"type": "api_error", "message": f"engine unavailable: {error}"}})
         self.send_json(404, {"error": {"type": "not_found", "message": path}})
 
-    def passthrough(self, method, path, body):
+    def passthrough(self, method, path, body, hide_usage=False):
         up = Upstream(method, path, body)
         meter = Meter("chat", (body or {}).get("model") or MODEL_ALIAS) if path.endswith("/chat/completions") else None
         if body and body.get("stream") and up.status == 200:
             self.start_sse()
             try:
-                # copy the engine's SSE bytes verbatim, metering the deltas as they pass
+                # forward the engine's SSE line by line, metering the deltas as they pass; the usage-only
+                # chunk this gateway asked for is dropped when the client did not ask for it
                 pending = b""
                 while True:
                     chunk = up.response.read1(65536) if hasattr(up.response, "read1") else up.response.read(65536)
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    pending += chunk
+                    out = b""
+                    while b"\n" in pending:
+                        raw_line, pending = pending.split(b"\n", 1)
+                        line = raw_line.strip()
+                        if line.startswith(b"data:") and line[5:].strip() != b"[DONE]":
+                            try:
+                                obj = json.loads(line[5:])
+                            except json.JSONDecodeError:
+                                obj = None
+                            if isinstance(obj, dict):
+                                if meter:
+                                    meter.chunk(obj)
+                                if hide_usage and obj.get("usage") and not obj.get("choices"):
+                                    continue
+                        out += raw_line + b"\n"
+                    if out:
+                        self.wfile.write(out)
+                        self.wfile.flush()
+                if pending:
+                    self.wfile.write(pending)
                     self.wfile.flush()
-                    if meter:
-                        pending += chunk
-                        while b"\n" in pending:
-                            line, pending = pending.split(b"\n", 1)
-                            line = line.strip()
-                            if line.startswith(b"data:") and line[5:].strip() != b"[DONE]":
-                                try:
-                                    meter.chunk(json.loads(line[5:]))
-                                except json.JSONDecodeError:
-                                    pass
             finally:
                 up.conn.close()
             if meter:
