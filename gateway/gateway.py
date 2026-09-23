@@ -68,7 +68,7 @@ class Meter:
             self.usage = obj["usage"]
         for choice in obj.get("choices") or []:
             delta = choice.get("delta") or {}
-            if delta.get("content") or delta.get("tool_calls"):
+            if delta.get("content") or delta.get("reasoning_content") or delta.get("reasoning") or delta.get("tool_calls"):
                 if self.first is None:
                     self.first = time.monotonic()
                 self.counted += 1
@@ -583,8 +583,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(404, {"error": {"type": "not_found", "message": path}})
 
     def passthrough(self, method, path, body, hide_usage=False):
-        up = Upstream(method, path, body)
         meter = Meter("chat", (body or {}).get("model") or MODEL_ALIAS) if path.endswith("/chat/completions") else None
+        up = Upstream(method, path, body)  # returns once the engine has answered the headers: after the whole answer when not streamed
         if body and body.get("stream") and up.status == 200:
             self.start_sse()
             try:
