@@ -25,7 +25,7 @@ One tensor per (k, n, K, codebook) class the kernel supports. Three checks each:
  (e) bf16 boundary: `linear(x_bf16) -> bf16` must equal `linear(x_bf16.half()).bfloat16()` BIT FOR BIT (NaN-aware),
      on normal inputs and on bf16 inputs beyond the fp16 range (they become inf exactly as torch's cast makes them).
 
-K = 3 (K3), K = 4 and K = 6 (lm_head) classes. Fused groups (q/k/v, gate/up, GDN qkv/z: one launch for several matrices that share the input) get the same three
+K = 3 (K3), K = 4, K = 5 (K5) and K = 6 (lm_head) classes. Fused groups (q/k/v, gate/up, GDN qkv/z: one launch for several matrices that share the input) get the same three
 checks (`--no-groups` skips them): the decoded weights of every shard through the fused launch, outputs against
 float64 and against ExLlamaV3's per-matrix kernels, graph replay.
 """
@@ -139,7 +139,7 @@ def check_dense(trellis: list, suhs: list, svhs: list, cb: int, gen) -> bool:
     ok = True
     for dt in (torch.float16, torch.bfloat16):
         x = x16.to(dt)
-        want = torch.cat([reference.dense_forward(x.to(torch.float16), t, su, sv, cb).to(dt)
+        want = torch.cat([reference.dense_forward(x.to(torch.float16), t, su, sv, cb, max_weight_bytes=1 << 31).to(dt)   # unsliced: the bit-for-bit reference
                           for t, su, sv in zip(trellis, suhs, svhs)], dim=1)
         out = torch.empty((96, sum(ns)), dtype=dt, device="cuda")
         ok = ok and bits_equal(ops.dense_group(x, trellis, suh_cat, svhs, cb, out), want)
@@ -238,7 +238,8 @@ def check(model_dir: str, key: str, spec, chunks) -> dict:
 
 
 GROUPS = (("self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj"), ("mlp.gate_proj", "mlp.up_proj"),
-          ("linear_attn.in_proj_qkv", "linear_attn.in_proj_z"))
+          ("linear_attn.in_proj_qkv", "linear_attn.in_proj_z"),
+          ("mlp.shared_expert.gate_proj", "mlp.shared_expert.up_proj"))   # K5: MoE models' shared expert
 
 
 def _load(model_dir, spec):
@@ -337,7 +338,7 @@ def main(argv=None) -> int:
     else:
         classes = defaultdict(list)
         for key, m in man.matrices.items():
-            if not any(s in key for s in args.skip) and m.bits.value in (3, 4, 6) and m.k % 128 == 0 and m.n % 128 == 0:   # K3
+            if not any(s in key for s in args.skip) and m.bits.value in (3, 4, 5, 6) and m.k % 128 == 0 and m.n % 128 == 0:   # K3, K5
                 classes[(m.k, m.n, m.bits.value, m.codebook.value)].append(key)
         keys = [v[len(v) // 2] for _, v in sorted(classes.items())]
     doc = {"torch": torch.__version__, "gpu": torch.cuda.get_device_name(0),
@@ -370,8 +371,8 @@ def main(argv=None) -> int:
                 prefix = key[: -len(grp[0])]
                 gkeys = [prefix + g for g in grp]
                 specs = [man.matrices.get(g) for g in gkeys]
-                if any(s is None for s in specs) or any(s.bits.value not in (3, 4) or s.n % 128 or s.k % 128 for s in specs):
-                    continue   # K3: fused groups at K = 3 or 4
+                if any(s is None for s in specs) or any(s.bits.value not in (3, 4, 5) or s.n % 128 or s.k % 128 for s in specs):
+                    continue   # K3: fused groups at K = 3 or 4; K5: or 5
                 if len({s.bits.value for s in specs}) != 1:
                     continue   # K3: one bitrate per fused group
                 seen.add(grp)

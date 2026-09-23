@@ -427,7 +427,8 @@ __global__ void Marlin(
   // kU8B128 = EXL3 K=6 (two vectors per lane: words hi, lo of 4 n-tiles, see dq8_regs_6bits).
   static_assert(a_type_id == vllm::kFloat16.id() && c_type_id == vllm::kFloat16.id() &&
                 (b_type_id == vllm::kU4B8.id() || b_type_id == vllm::kU8B128.id() ||
-                 b_type_id == vllm::ScalarType::uint(3, 0).id()) && group_blocks == -1 &&   // K3
+                 b_type_id == vllm::ScalarType::uint(3, 0).id() ||   // K3
+                 b_type_id == vllm::ScalarType::uint(5, 0).id()) && group_blocks == -1 &&   // K5
                 !is_zp_float && exl3_cb >= 0 && exl3_cb <= 15);  // 3, 4 = timing probes (exl3_decode.cuh)
   constexpr bool exl3_k6 = b_type_id == vllm::kU8B128.id();
   // K3: EXL3 K = 3: tiles staged byte-exact (24 words each, [k/16, n/64, 4, 24] = the trellis as stored); every lane
@@ -435,6 +436,9 @@ __global__ void Marlin(
   // All warp-geometry constants keep their K = 4 values; only the B copy and the B fragment load differ
   // (same scheme as the MoE front, exl3_hopper_moe_template.h).
   constexpr bool exl3_k3 = b_type_id == vllm::ScalarType::uint(3, 0).id();
+  // K5: EXL3 K = 5: the same byte-exact scheme with 40-word tiles ([k/16, n/64, 4, 40]); every lane gathers four words
+  // per n-tile (two per dq4<5> group) and decodes with dq8_regs_5bits. Warp geometry in K = 4 units, as for K = 3.
+  constexpr bool exl3_k5 = b_type_id == vllm::ScalarType::uint(5, 0).id();
 
   extern __shared__ int4 sh[];
   float* sh_a_s = reinterpret_cast<float*>(sh);
@@ -627,19 +631,20 @@ __global__ void Marlin(
   constexpr int a_sh_wr_iters = div_ceil(a_sh_stage, a_sh_wr_delta);
 
   // B sizes/strides (int4 units). K3: a k-tile row of n columns is n * 3 / 8 int4 (24 words per 16x16 tile).
-  int b_gl_stride = exl3_k3 ? prob_n * 3 / 8 : 16 * prob_n / (pack_factor * (is_a_8bit ? 2 : 4));
-  constexpr int b_sh_stride = exl3_k3 ? thread_n_blocks * 6
+  // K5: a k-tile row of n columns is n * 5 / 8 int4 (40 words per 16x16 tile); a slice row thread_n_blocks * 10 int4.
+  int b_gl_stride = exl3_k5 ? prob_n * 5 / 8 : exl3_k3 ? prob_n * 3 / 8 : 16 * prob_n / (pack_factor * (is_a_8bit ? 2 : 4));
+  constexpr int b_sh_stride = exl3_k5 ? thread_n_blocks * 10 : exl3_k3 ? thread_n_blocks * 6
                                       : ((thread_n_blocks * 16) * 16 / pack_factor) / (is_a_8bit ? 2 : 4);
-  constexpr int b_thread_vecs = exl3_k3 ? 1 : (b_type.size_bits() == 4 ? 1 : 2);
+  constexpr int b_thread_vecs = (exl3_k3 || exl3_k5) ? 1 : (b_type.size_bits() == 4 ? 1 : 2);   // K5
   // K3: warp geometry (k split, reduction) in K = 4 units: identical for K = 4, K = 6 (2 vectors per lane) and K = 3.
-  constexpr int b_sh_stride_threads = exl3_k3 ? thread_n_blocks * 8 : b_sh_stride / b_thread_vecs;
-  constexpr int b_sh_stride_idx = exl3_k3 ? thread_n_blocks * 8 : b_sh_stride;   // K3: K = 4-layout index base (b_sh_rd)
+  constexpr int b_sh_stride_threads = (exl3_k3 || exl3_k5) ? thread_n_blocks * 8 : b_sh_stride / b_thread_vecs;   // K5
+  constexpr int b_sh_stride_idx = (exl3_k3 || exl3_k5) ? thread_n_blocks * 8 : b_sh_stride;   // K3: K = 4-layout index base (b_sh_rd); K5
 
   int b_gl_rd_delta_o = b_gl_stride * thread_k_blocks / (is_a_8bit ? 2 : 1);
   constexpr int b_sh_wr_delta = threads * b_thread_vecs;
   constexpr int b_sh_stage =
       b_sh_stride * thread_k_blocks / (is_a_8bit ? 2 : 1);
-  constexpr int b_sh_wr_iters = exl3_k3 ? (thread_n_blocks * 8 * thread_k_blocks) / threads : b_sh_stage / b_sh_wr_delta;
+  constexpr int b_sh_wr_iters = (exl3_k3 || exl3_k5) ? (thread_n_blocks * 8 * thread_k_blocks) / threads : b_sh_stage / b_sh_wr_delta;   // K5
   constexpr int b_sh_cp_iters = div_ceil(b_sh_stage, b_sh_wr_delta);   // K3: predicated copy (stage not a multiple)
 
   // Scale sizes/strides without act_order
@@ -687,7 +692,7 @@ __global__ void Marlin(
   a_sh_rd += 2 * ((threadIdx.x / 32) / tb_n_warps) * b_sh_wr_iters;
 
   int b_gl_rd;
-  if constexpr (exl3_k3) {
+  if constexpr (exl3_k3 || exl3_k5) {   // K5
     b_gl_rd = 0;   // K3: thread-independent base; the copy loop adds (k-tile, column) itself
   } else if (threads <= b_sh_stride) {
     b_gl_rd = threadIdx.x;
@@ -703,6 +708,9 @@ __global__ void Marlin(
   // K3: this lane's two tile words and window shift (ExLlamaV3's constants, exl3_decode.cuh)
   [[maybe_unused]] int k3_src_a = 0, k3_src_b = 0, k3_s2 = 0;
   if constexpr (exl3_k3) aikido_exl3::k3_lane_words(threadIdx.x % 32, k3_src_a, k3_src_b, k3_s2);
+  // K5: this lane's four tile words (two per dq4<5> group) and the two group shifts (ExLlamaV3's dq4 arithmetic)
+  [[maybe_unused]] int k5_a0 = 0, k5_b0 = 0, k5_s0 = 0, k5_a1 = 0, k5_b1 = 0, k5_s1 = 0;
+  if constexpr (exl3_k5) aikido_exl3::k5_lane_words(threadIdx.x % 32, k5_a0, k5_b0, k5_s0, k5_a1, k5_b1, k5_s1);
 
   // For act_order
   int slice_k_start = tb_k * slice_row;
@@ -858,6 +866,7 @@ __global__ void Marlin(
   I4 frag_b_quant[2][b_thread_vecs];
   I4 frag_b_prev[2];  // AIKIDO_WRAP_LOAD (K = 4): the previous lane's staged vector = the 12 wrap-around bits
   [[maybe_unused]] uint32_t frag_b3[2][4][2];  // K3: (high, low) tile word per n-tile of the lane
+  [[maybe_unused]] uint32_t frag_b5[2][exl3_k5 ? 4 : 1][4];  // K5: (a0, b0, a1, b1) tile words per n-tile of the lane
   FragC frag_c[thread_m_blocks][is_a_8bit ? 2 : 4][2];
   FragC frag_c_tmp[thread_m_blocks][is_a_8bit ? 2 : 4][2];
   FragS frag_s[2][4];  // No act-order
@@ -946,7 +955,7 @@ __global__ void Marlin(
             a_sh_wr_pred[i]);
       }
       int4* sh_b_stage = sh_b + b_sh_stage * pipe;
-      if constexpr (exl3_k3) {
+      if constexpr (exl3_k3 || exl3_k5) {   // K5: same copy, 40-word tiles
         // K3: stage-linear int4 s = (k-tile kk, column col) of the slice's tile rows, byte-exact copy
   #pragma unroll
         for (int i = 0; i < b_sh_cp_iters; i++) {
@@ -1049,7 +1058,18 @@ __global__ void Marlin(
           frag_a[k % 2][i], &sh_a_stage[a_sh_rd_trans[k % b_sh_wr_iters][i]]);
     int4* sh_b_stage = sh_b + b_sh_stage * pipe;
 
-    if constexpr (exl3_k3) {
+    if constexpr (exl3_k5) {
+      // K5: as for K = 3; the (k-tile, n-group) unit is 160 words (4 tiles x 40), four words per tile and lane.
+      const int q4 = b_sh_stride_idx * (k % b_sh_wr_iters) + b_sh_rd;
+      const uint32_t* w = reinterpret_cast<const uint32_t*>(sh_b_stage) + (q4 >> 5) * 160;
+  #pragma unroll
+      for (int j = 0; j < 4; j++) {
+        frag_b5[k % 2][j][0] = w[j * 40 + k5_a0];
+        frag_b5[k % 2][j][1] = w[j * 40 + k5_b0];
+        frag_b5[k % 2][j][2] = w[j * 40 + k5_a1];
+        frag_b5[k % 2][j][3] = w[j * 40 + k5_b1];
+      }
+    } else if constexpr (exl3_k3) {
       // K3: the K = 4-layout int4 index names (k-tile, n-group, lane); in the byte-exact layout that
       // (k-tile, n-group) unit is 96 words (4 tiles x 24), and the lane gathers its two words per tile.
       const int q4 = b_sh_stride_idx * (k % b_sh_wr_iters) + b_sh_rd;
@@ -1356,7 +1376,7 @@ __global__ void Marlin(
     // tile 0 of the next vector, which the double-buffered register load has already delivered) is decoded before
     // the current MMA is issued, so the decode chain never sits between two MMAs of the same lane.
     // (Tried before and slower: decode all four tiles first, then four MMAs.)
-    if constexpr (exl3_cb == 8 && !exl3_k6 && !exl3_k3) {   // K3: probe is K = 4 only
+    if constexpr (exl3_cb == 8 && !exl3_k6 && !exl3_k3 && !exl3_k5) {   // K3: probe is K = 4 only; K5
       auto dec = [&](int kk, int jj, FragB& o0, FragB& o1) {
         uint32_t bw = (uint32_t)frag_b_quant[kk][0][jj];
   #if AIKIDO_WRAP_LOAD
@@ -1399,7 +1419,11 @@ __global__ void Marlin(
       }
       // AIKIDO: word j of this lane's staged vector is the lane's stream word of n-tile j; the 12 wrap
       // bits come from the previous lane of the same warp (tail-biting: lane 0 <- lane 31).
-      if constexpr (exl3_k3) {
+      if constexpr (exl3_k5) {
+        // K5: the lane's four tile words of n-tile j (fetch_to_registers)
+        aikido_exl3::dq8_regs_5bits<FragB, exl3_cb>(frag_b5[k2][j][0], frag_b5[k2][j][1], k5_s0,
+                                                    frag_b5[k2][j][2], frag_b5[k2][j][3], k5_s1, frag_b0, frag_b1);
+      } else if constexpr (exl3_k3) {
         // K3: (high, low) tile word of n-tile j gathered in fetch_to_registers; no neighbour needed.
         aikido_exl3::dq8_regs_3bits<FragB, exl3_cb>(frag_b3[k2][j][0], frag_b3[k2][j][1], k3_s2, frag_b0, frag_b1);
       } else if constexpr (exl3_k6) {
@@ -2278,7 +2302,7 @@ __global__ void Marlin(
         a_gl_rd = a_gl_stride * (threadIdx.x / a_gl_rd_delta_o) +
                   (threadIdx.x % a_gl_rd_delta_o);
         a_gl_rd += a_gl_rd_delta_o * slice_row;
-        if constexpr (exl3_k3)
+        if constexpr (exl3_k3 || exl3_k5)   // K5
           b_gl_rd = 0;   // K3
         else
           b_gl_rd = b_gl_stride * (threadIdx.x / b_sh_stride) +

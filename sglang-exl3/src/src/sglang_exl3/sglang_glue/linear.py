@@ -25,6 +25,7 @@ _HOPPER_MAX_N = int(os.environ.get("SGLANG_EXL3_HOPPER_MAX_N", "65536"))   # 24 
 
 
 _knobs_done = False
+TARGET_LM_HEADS: list = []        # the target's quantized lm_head(s), for the draft's hot-token head (plugin.py)
 
 
 def _apply_kernel_knobs() -> None:
@@ -83,7 +84,9 @@ class Exl3LinearMethod(LinearMethodBase):
             layer.register_parameter(suffix, p)
         if not hasattr(layer, "weight"):
             # ParallelLMHead: get_embed_and_head / should_apply_lm_head_quant_method read `.weight`
-            w = torch.nn.Parameter(torch.empty(0, dtype=params_dtype), requires_grad=False)
+            # zero-width (rows = vocab): SGLang's speculative token map slices head.data[hot_ids] before handing it to
+            # the draft, which must work on the placeholder too (plugin.py builds the dense hot-token head)
+            w = torch.nn.Parameter(torch.empty((sum(output_partition_sizes), 0), dtype=params_dtype), requires_grad=False)
             set_weight_attrs(w, {"weight_loader": self._ignore_loader, "exl3_placeholder": True})
             layer.register_parameter("weight", w)
 
@@ -141,7 +144,8 @@ class Exl3LinearMethod(LinearMethodBase):
         if _HOPPER in ("auto", "marlin") and hopper.probe().available:
             ok, why = hopper.supports(mats[0], widths, codebooks)
             if ok and sum(widths) > _HOPPER_MAX_N:
-                ok, why = False, f"n={sum(widths)} above SGLANG_EXL3_HOPPER_MAX_N={_HOPPER_MAX_N} (lm_head stays on ExLlamaV3's K=6 kernel: 6 bits resident instead of 8)"
+                # K5: K = 3, 4, 5 and 6 groups route here via hopper.supports; the cap keeps the lm_head (K=6 or K=5) on ExLlamaV3
+                ok, why = False, f"n={sum(widths)} above SGLANG_EXL3_HOPPER_MAX_N={_HOPPER_MAX_N} (lm_head stays on ExLlamaV3's kernel)"
             if ok:
                 _apply_kernel_knobs()
                 *tensors, layer.exl3_hopper_ends = hopper.prepare(*mats)
@@ -174,6 +178,8 @@ class Exl3LinearMethod(LinearMethodBase):
                 layer.exl3_sliced_count = len(group.tables())
                 layer.exl3_sliced_min_rows = 3 if max(group.widths) >= 16384 else 1
         layer.exl3_has_dense = False
+        if self.prefix.endswith("lm_head") and not self.prefix.startswith("mtp"):
+            TARGET_LM_HEADS.append(layer)
 
     # ---- forward
     def apply(self, layer, x: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:

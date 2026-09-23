@@ -135,7 +135,7 @@ class Exl3Config(QuantizationConfig):
             return None
         infos = [self.lookup(p) for p in self._sources(prefix)]
         if not any(infos):
-            return UnquantizedLinearMethod()
+            return _padded_unquantized()
         if not all(infos):
             raise ValueError(f"{prefix}: fused module mixes EXL3 and unquantized sources {self._sources(prefix)}")
         return Exl3LinearMethod(prefix, infos)
@@ -154,3 +154,27 @@ def _expert_of(key: str, prefix: str) -> bool:
         prefix = prefix.replace(a, b)
         key = key.replace(a, b)
     return key.startswith(prefix + ".") and ".experts." in key
+
+
+_PAD_CLS = None
+
+
+def _padded_unquantized():
+    """Unquantized linears left in bf16 by EXL3 checkpoints (GDN in_proj_a/b = in_proj_ba, 5120 -> 96 on the 27B).
+    On sm_86 cuBLAS picks a one-thread-block CUTLASS kernel for 2-7 rows at such shapes (26-60 us instead of ~5 us, i.e.
+    ~2.8 ms per MTP round on the 27B). Padding the row count to 8 selects the good kernel; rows are independent, so the
+    result rows are identical to the unpadded GEMM's. SGLANG_EXL3_PAD_SMALL_M=0 disables it."""
+    global _PAD_CLS
+    from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
+    if os.environ.get("SGLANG_EXL3_PAD_SMALL_M", "1") != "1":
+        return UnquantizedLinearMethod()
+    if _PAD_CLS is None:
+        class Exl3PaddedUnquantizedLinearMethod(UnquantizedLinearMethod):
+            def apply(self, layer, x, bias=None):
+                m = x.shape[0] if x.dim() == 2 else -1
+                if 1 < m < 8 and layer.weight.shape[0] <= 1024:
+                    xp = torch.nn.functional.pad(x, (0, 0, 0, 8 - m))
+                    return super().apply(layer, xp, bias)[:m]
+                return super().apply(layer, x, bias)
+        _PAD_CLS = Exl3PaddedUnquantizedLinearMethod
+    return _PAD_CLS()

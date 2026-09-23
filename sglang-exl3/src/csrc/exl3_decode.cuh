@@ -298,6 +298,46 @@ __device__ __forceinline__ void dq8_regs_3bits(uint32_t a, uint32_t b, int s2, F
                            w4 & 0xffff, w5 & 0xffff, w6 & 0xffff, w7 & 0xffff, f0, f1);
 }
 
+// K5: K = 5: a lane's 8 windows are the 16-bit fields ending at stream bits 40l + 5(p+1), p = 0..7 (1280-bit
+// tail-biting tile stream, 40 words). ExLlamaV3 decodes them as two dq4<5> groups (exl3_dq.cuh dq_dispatch, bits == 5:
+// dq4<5, cb>(ptr, t_offset) and dq4<5, cb>(ptr, t_offset + 4), t_offset = 8 * lane); each group of four windows spans
+// 31 bits and sits in two tile words (a = word i0, b = word i2) at a lane-constant alignment s2. The tile is staged
+// byte-exact (40 words) and every lane gathers its four words (k5_lane_words: verbatim dq4 index arithmetic).
+// Per lane and group: src_a = i0 % 40 (HIGH word), src_b = i2 % 40 (LOW word), s2 = the shift of the group's last window.
+__device__ __forceinline__ void k5_lane_words(int lane, int& a0, int& b0, int& s0, int& a1, int& b1, int& s1)
+{
+    #pragma unroll
+    for (int g = 0; g < 2; g++)
+    {
+        int t_offset = (lane << 3) + 4 * g;
+        int bb0 = (t_offset + 257) * 5 - 16;   // start of first word
+        int bb1 = bb0 + 3 * 5;                 // start of last word
+        int bb2 = bb1 + 16;                    // end of last word
+        int i0 = bb0 / 32;
+        int i2 = (bb2 - 1) / 32;
+        int s2 = (i2 + 1) * 32 - bb2;
+        if (g == 0) { a0 = i0 % 40; b0 = i2 % 40; s0 = s2; }
+        else        { a1 = i0 % 40; b1 = i2 % 40; s1 = s2; }
+    }
+}
+
+// dq4<5> x 2 in register form. ExLlamaV3 computes each window as fshift(b, a, s2 + 5m) & 0xffff, m = 0..3; the four
+// windows of a group lie in the 31 bits above s2 of the 64-bit (a:b), so they are taken from the one 32-bit funnel
+// result v = (a:b) >> s2 as (v >> 5m) & 0xffff: the same bits (s2 + 5m + 16 <= s2 + 31 < s2 + 32). Group 0 gives
+// w0..w3 (positions 8l .. 8l+3), group 1 w4..w7; decode8 pairs them exactly as dq4 fills frag0 / frag1.
+template <typename FragB, int cb>
+__device__ __forceinline__ void dq8_regs_5bits(uint32_t a0, uint32_t b0, int s0, uint32_t a1, uint32_t b1, int s1,
+                                               FragB& f0, FragB& f1)
+{
+    uint32_t w0, w1, w2, w3, w4, w5, w6, w7;
+    w3 = k3_fshift(b0, a0, s0);
+    w2 = w3 >> 5; w1 = w3 >> 10; w0 = w3 >> 15;
+    w7 = k3_fshift(b1, a1, s1);
+    w6 = w7 >> 5; w5 = w7 >> 10; w4 = w7 >> 15;
+    decode8<FragB, cb>(w0 & 0xffff, w1 & 0xffff, w2 & 0xffff, w3 & 0xffff,
+                       w4 & 0xffff, w5 & 0xffff, w6 & 0xffff, w7 & 0xffff, f0, f1);
+}
+
 // K = 6: a lane's 8 windows end at stream bits 48l + 6(p+1), p = 0..7, and reach back to bit 48l - 10. The load-time
 // repack (`repack_trellis`, K = 6 branch) stores per lane and tile the 64 stream bits [48l - 16, 48l + 48) (tail-biting)
 // as two words hi:lo, so window p = (hi:lo >> 6(7-p)) & 0xffff. Same windows as ExLlamaV3's dq4<6> (exl3_dq.cuh),

@@ -65,7 +65,7 @@ def step_bench(args, man) -> int:
             if key.endswith(grp[0]):
                 gkeys = tuple(key[: -len(grp[0])] + g for g in grp)
                 specs = [man.matrices.get(g) for g in gkeys]
-                if (all(s is not None and s.bits.value in (3, 4) and s.k % 128 == 0 and s.n % 128 == 0 for s in specs)   # K3
+                if (all(s is not None and s.bits.value in (3, 4, 5) and s.k % 128 == 0 and s.n % 128 == 0 for s in specs)   # K3, K5
                         and len({s.bits.value for s in specs}) == 1):  # K=6: lm_head only; one K per fused group
                     units[("group", specs[0].k, tuple(s.n for s in specs), specs[0].codebook.value)].append(gkeys)
                     grouped.update(gkeys)

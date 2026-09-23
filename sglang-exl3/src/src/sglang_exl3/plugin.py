@@ -73,4 +73,42 @@ def _patch_mtp_fc() -> None:
             fc.process_weights_after_loading()
         return out
 
-    cls.__init__, cls.load_weights, cls._exl3_patched = __init__, load_weights, True
+    orig_set = cls.set_embed_and_head
+
+    def set_embed_and_head(self, embed, head):
+        orig_set(self, embed, head)
+        if head is not None and head.dim() == 2 and head.shape[1] == 0:
+            _install_hot_head(self)
+
+    cls.__init__, cls.load_weights, cls.set_embed_and_head, cls._exl3_patched = __init__, load_weights, set_embed_and_head, True
+
+
+@torch.no_grad()
+def _install_hot_head(draft) -> None:
+    """--speculative-token-map with an EXL3 target: SGLang sliced the target's zero-width lm_head placeholder, so the
+    draft has no weights. Build a dense bf16 head for the hot tokens from the target's EXL3 head (identity blocks pushed
+    through the quantized linear, i.e. the exact effective weights of the target head), and serve it unquantized. The
+    target keeps verifying with the full quantized head, so outputs are unchanged; only draft acceptance can move."""
+    from sglang.srt.layers.quantization.unquant import UnquantizedEmbeddingMethod
+    from sglang.srt.runtime_context import get_spec
+    from sglang.srt.speculative.spec_utils import load_token_map
+    from .sglang_glue.linear import TARGET_LM_HEADS
+    if not TARGET_LM_HEADS:
+        raise RuntimeError("sglang-exl3: token map requested but no quantized target lm_head was registered")
+    target = TARGET_LM_HEADS[-1]
+    hot = load_token_map(get_spec().speculative_token_map).to(target.exl3_svh_0.device)
+    k = target.exl3_suh_0.numel()
+    w = torch.empty((hot.numel(), k), dtype=torch.bfloat16, device=hot.device)
+    step = 256
+    for i in range(0, k, step):
+        eye = torch.zeros((min(step, k - i), k), dtype=torch.bfloat16, device=hot.device)
+        eye[torch.arange(eye.shape[0]), torch.arange(i, i + eye.shape[0])] = 1
+        y = target.quant_method.apply(target, eye)          # (block, vocab): rows of the effective weight
+        w[:, i:i + eye.shape[0]] = y[:, hot].t()
+        del y, eye
+    lm = draft.lm_head
+    lm.quant_method = UnquantizedEmbeddingMethod()
+    lm.weight = torch.nn.Parameter(w, requires_grad=False)
+    torch.cuda.empty_cache()
+    logger.info("sglang-exl3: draft hot-token head %s built from the EXL3 target head (%.0f MB)", tuple(w.shape),
+                w.numel() * 2 / 2**20)

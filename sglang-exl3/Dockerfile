@@ -9,6 +9,7 @@ LABEL ai.omarchy.engine="sglang"
 LABEL ai.omarchy.engine.version="0.5.20"
 LABEL ai.omarchy.quant="exl3"
 ARG TORCH_CUDA_ARCH_LIST="8.6"
+ENV AIKIDO_KBITS=3,4,5,6
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ninja-build openssh-server \
@@ -27,6 +28,8 @@ RUN cd /opt/sglang-exl3/csrc && MAX_JOBS=4 AIKIDO_MOE=1 python3 setup.py build_e
  && rm -rf build/temp.* build/gen \
  && pip install --no-deps /opt/sglang-exl3
 ENV PYTHONPATH=/opt/sglang-exl3/csrc/build/lib
+# Hot-token lists for --speculative-token-map (32k tokens; public corpora, tokenmaps/make_token_map.py)
+COPY tokenmaps /opt/sglang-exl3/tokenmaps
 COPY entrypoint.sh /opt/entrypoint.sh
 RUN chmod 0755 /opt/entrypoint.sh
 EXPOSE 30000

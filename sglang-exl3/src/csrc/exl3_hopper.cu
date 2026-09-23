@@ -1,6 +1,6 @@
 // aikido-exl3 Hopper kernels: host side + torch bindings.
 //
-// y = Had128(x * suh) @ W_hat -> Had128 -> * svh for an EXL3 (ExLlamaV3 trellis) matrix, K = 3, 4 or 6,
+// y = Had128(x * suh) @ W_hat -> Had128 -> * svh for an EXL3 (ExLlamaV3 trellis) matrix, K = 3, 4, 5 or 6 (K5),
 // fp16 or bf16 at the boundary (the conversions live inside the two Hadamard launches, exl3_had.cuh).
 //
 // - GEMM: exl3_hopper_template.h = vLLM's Marlin kernel template (Apache-2.0) with the int4 dequant replaced by
@@ -58,7 +58,8 @@ static const ThreadCfg large_cfgs[] = {{64, 256, 256}, {64, 128, 128}, {128, 64,
 static int kernel_cache_size(const ThreadCfg& c, int thread_m_blocks, int kb) {
   int tb_k = c.thread_k, tb_n = c.thread_n, tb_m = thread_m_blocks * 16;
   int sh_a_size = kStages * (tb_m * tb_k) * 2;
-  int sh_b_size = kb == 3 ? kStages * (tb_k * tb_n * 3 / 8)                        // K3
+  int sh_b_size = kb == 5 ? kStages * (tb_k * tb_n * 5 / 8)                        // K5
+                : kb == 3 ? kStages * (tb_k * tb_n * 3 / 8)                        // K3
                           : kStages * (tb_k * tb_n / (kb == 4 ? 8 : 4)) * 4;
   int sh_red_size = tb_m * (tb_n + 8) * 2;
   int sh_bias_size = tb_n * 2;
@@ -295,15 +296,16 @@ static void had_out_launch(void* y, bool y_bf16, const half* svh, int rows, int 
 // Torch entry points
 
 // -> EXL3 bits per weight of a repacked trellis: [k/16, n/64, 32, 4] = K 4, [k/16, n/64, 32, 4, 2] = K 6,
-// [k/16, n/64, 4, 24] = K 3 (K3: the tiles exactly as stored, 24 words each)
+// [k/16, n/64, 4, 24] = K 3 (K3: the tiles exactly as stored, 24 words each), [k/16, n/64, 4, 40] = K 5 (K5, 40 words)
 static int kbits_from_trellis_check(const at::Tensor& b, int64_t k, int64_t n) {
   TORCH_CHECK(b.is_cuda() && b.is_contiguous(), "repacked trellis must be a contiguous CUDA tensor");
   TORCH_CHECK(b.dtype() == at::kInt, "repacked trellis must be int32 (use repack_trellis)");
   const bool k3 = b.dim() == 4 && b.size(2) == 4 && b.size(3) == 24;   // K3
-  TORCH_CHECK(k3 || ((b.dim() == 4 || (b.dim() == 5 && b.size(4) == 2)) && b.size(2) == 32 && b.size(3) == 4),
-              "repacked trellis must be [k/16, n/64, 32, 4] (K=4), [k/16, n/64, 32, 4, 2] (K=6) or [k/16, n/64, 4, 24] (K=3)");
+  const bool k5 = b.dim() == 4 && b.size(2) == 4 && b.size(3) == 40;   // K5
+  TORCH_CHECK(k3 || k5 || ((b.dim() == 4 || (b.dim() == 5 && b.size(4) == 2)) && b.size(2) == 32 && b.size(3) == 4),
+              "repacked trellis must be [k/16, n/64, 32, 4] (K=4), [k/16, n/64, 32, 4, 2] (K=6), [k/16, n/64, 4, 24] (K=3) or [k/16, n/64, 4, 40] (K=5)");
   TORCH_CHECK(b.size(0) * 16 == k && b.size(1) * 64 == n, "repacked trellis shape does not match k, n");
-  return k3 ? 3 : (b.dim() == 4 ? 4 : 6);
+  return k5 ? 5 : k3 ? 3 : (b.dim() == 4 ? 4 : 6);   // K5
 }
 
 static bool is_16bit_float(const at::Tensor& t) { return t.dtype() == at::kHalf || t.dtype() == at::kBFloat16; }
@@ -324,11 +326,17 @@ static bool is_16bit_float(const at::Tensor& t) { return t.dtype() == at::kHalf 
 // K3: K = 3 -> [k/16, n/64, 4, 24]: the tiles exactly as stored (24 little-endian uint32 words = 768 bits each), a pure
 // view of the int16 trellis as int32 (3 bits per weight resident; the kernel stages tiles byte-exact and every lane
 // gathers its two words, exl3_decode.cuh k3_lane_words / dq8_regs_3bits). Same layout as the MoE front's K = 3 stack.
+// K5: K = 5 -> [k/16, n/64, 4, 40]: likewise the tiles as stored (40 words = 1280 bits each; lanes gather four words,
+// k5_lane_words / dq8_regs_5bits).
 at::Tensor repack_trellis(const at::Tensor& trellis) {
   TORCH_CHECK(trellis.dim() == 3 && trellis.dtype() == at::kShort, "trellis must be int16 [k/16, n/16, 16K]");
-  TORCH_CHECK(trellis.size(2) == 48 || trellis.size(2) == 64 || trellis.size(2) == 96, "only K = 3, 4 and 6 are supported");
+  TORCH_CHECK(trellis.size(2) == 48 || trellis.size(2) == 64 || trellis.size(2) == 80 || trellis.size(2) == 96,
+              "only K = 3, 4, 5 and 6 are supported");   // K5
   TORCH_CHECK(trellis.size(1) % 8 == 0 && trellis.size(0) % 8 == 0, "k and n must be multiples of 128");
   int64_t kt = trellis.size(0), nt = trellis.size(1);
+  if (trellis.size(2) == 80) {   // K5
+    return trellis.contiguous().view(at::kInt).view({kt, nt / 4, 4, 40}).contiguous();
+  }
   if (trellis.size(2) == 48) {   // K3
     return trellis.contiguous().view(at::kInt).view({kt, nt / 4, 4, 24}).contiguous();
   }
@@ -363,6 +371,8 @@ at::Tensor repack_trellis(const at::Tensor& trellis) {
 at::Tensor unpack_trellis(const at::Tensor& b) {
   TORCH_CHECK((b.dim() == 4 || b.dim() == 5) && b.dtype() == at::kInt);
   int64_t kt = b.size(0), g = b.size(1);
+  if (b.dim() == 4 && b.size(2) == 4 && b.size(3) == 40)   // K5: same bytes, same order
+    return b.contiguous().view({kt, g * 4, 40}).view(at::kShort);
   if (b.dim() == 4 && b.size(2) == 4 && b.size(3) == 24)   // K3: same bytes, same order
     return b.contiguous().view({kt, g * 4, 24}).view(at::kShort);
   if (b.dim() == 4) return b.permute({0, 1, 3, 2}).contiguous().view({kt, g * 4, 32}).view(at::kShort);

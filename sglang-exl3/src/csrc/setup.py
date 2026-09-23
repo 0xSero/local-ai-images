@@ -7,7 +7,7 @@
 Result: build/lib/aikido_exl3_kernels*.so  (PYTHONPATH=/scratch/aikido/exl3/csrc/build/lib)
 
 Env: AIKIDO_MBS="0,1,2,3,4" row-block families (0 = rows<=8 transposed MMA, m = rows<=16m);
-     AIKIDO_CODEBOOKS="1,2" (0 = 3INST, 1 = MCG, 2 = MUL1); AIKIDO_KBITS="3,4,6" (EXL3 bits per weight; 3 = byte-exact tile staging, K3).
+     AIKIDO_CODEBOOKS="1,2" (0 = 3INST, 1 = MCG, 2 = MUL1); AIKIDO_KBITS="3,4,5,6" (EXL3 bits per weight; 3, 5 = byte-exact tile staging, K3 / K5).
      One generated .cu per (family, codebook, K). AIKIDO_WRAP_LOAD=0 restores the lane shuffle for the K=4 wrap bits
      (default 1: second shared-memory load, 0.4-1.0 us per launch faster on H200, same decoded bits).
 """
@@ -18,7 +18,7 @@ from torch.utils import cpp_extension
 here = os.path.dirname(os.path.abspath(__file__))
 mbs = [m.strip() for m in os.environ.get("AIKIDO_MBS", "0,1,2,3,4").split(",") if m.strip()]
 cbs = [c.strip() for c in os.environ.get("AIKIDO_CODEBOOKS", "1,2").split(",") if c.strip()]
-kbs = [b.strip() for b in os.environ.get("AIKIDO_KBITS", "3,4,6").split(",") if b.strip()]   # K3: default includes 3
+kbs = [b.strip() for b in os.environ.get("AIKIDO_KBITS", "3,4,5,6").split(",") if b.strip()]   # K3: default includes 3; K5: and 5
 gen = os.path.join(here, "build", "gen")
 os.makedirs(gen, exist_ok=True)
 sources = ["exl3_hopper.cu"]

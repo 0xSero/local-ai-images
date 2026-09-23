@@ -43,12 +43,14 @@ static constexpr int kStages = 4;
 // K3: EXL3 K = 3: a 3-bit "weight type" that only selects the byte-exact 24-word tile staging in the template
 // (vLLM's ScalarType has no 3-bit constant; the id is what the kernel template switches on). Same id as the MoE front.
 static constexpr vllm::ScalarTypeId kExl3K3Id = vllm::ScalarType::uint(3, 0).id();
+// K5: EXL3 K = 5: same scheme with 40-word tiles (byte-exact staging)
+static constexpr vllm::ScalarTypeId kExl3K5Id = vllm::ScalarType::uint(5, 0).id();
 
 // Kernel type for (threads, thread_n, thread_k, mb, cb, kb); mb = thread_m_blocks, 0 = rows <= 8 (transposed MMA);
-// kb = EXL3 bits per weight: 3 (byte-exact tile staging, K3), 4 (Marlin 4-bit staging) or 6 (Marlin 8-bit staging,
+// kb = EXL3 bits per weight: 3 / 5 (byte-exact tile staging, K3 / K5), 4 (Marlin 4-bit staging) or 6 (Marlin 8-bit staging,
 // two vectors per lane)
 #define AIKIDO_KERNEL(threads, tn, tk, mb, cb, kb)                                                          \
-  Marlin<vllm::kFloat16.id(), (kb == 4 ? vllm::kU4B8.id() : kb == 3 ? kExl3K3Id : vllm::kU8B128.id()),      \
+  Marlin<vllm::kFloat16.id(), (kb == 4 ? vllm::kU4B8.id() : kb == 3 ? kExl3K3Id : kb == 5 ? kExl3K5Id /* K5 */ : vllm::kU8B128.id()), \
          vllm::kFloat16.id(),                                                                               \
          vllm::kFloat16.id(), threads, (mb == 0 ? 1 : mb), tn / 16, tk / 16, (mb == 0), kStages, -1, false, cb>
 
