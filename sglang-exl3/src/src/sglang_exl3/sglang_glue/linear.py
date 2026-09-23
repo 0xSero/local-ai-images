@@ -24,6 +24,31 @@ _HOPPER = os.environ.get("SGLANG_EXL3_KERNEL", "auto")   # auto | exllamav3 | ma
 _HOPPER_MAX_N = int(os.environ.get("SGLANG_EXL3_HOPPER_MAX_N", "65536"))   # 24 GB cards: keep the K=6 head lean
 
 
+_knobs_done = False
+
+
+def _apply_kernel_knobs() -> None:
+    """Runtime knobs of the Marlin-template kernels (once per process): SGLANG_EXL3_BLOCKS_PER_SM (1|2, default 2),
+    SGLANG_EXL3_IN_HAD_INLAUNCH (0|1: input Hadamard as the cooperative prologue of the GEMM launch),
+    SGLANG_EXL3_OUT_HAD_INLAUNCH (1|0), SGLANG_EXL3_HAD_WARPS (8|1)."""
+    global _knobs_done
+    if _knobs_done:
+        return
+    _knobs_done = True
+    bps = int(os.environ.get("SGLANG_EXL3_BLOCKS_PER_SM", "2"))   # 2 measured +10 % per step on the 3090; per-launch fallback in the host
+    if bps != 1:
+        hopper._load().set_blocks_per_sm(bps)
+    if os.environ.get("SGLANG_EXL3_IN_HAD_INLAUNCH", "0") == "1":
+        hopper.set_in_had_inlaunch(True)
+    if os.environ.get("SGLANG_EXL3_OUT_HAD_INLAUNCH", "1") == "0":
+        hopper.set_out_had_inlaunch(False)
+    warps = int(os.environ.get("SGLANG_EXL3_HAD_WARPS", "8"))
+    if warps != 8:
+        hopper.set_had_warps(warps)
+    logger.info("sglang-exl3 kernel knobs: blocks_per_sm=%d in_had_inlaunch=%s out_had_inlaunch=%s had_warps=%d", bps,
+                os.environ.get("SGLANG_EXL3_IN_HAD_INLAUNCH", "0"), os.environ.get("SGLANG_EXL3_OUT_HAD_INLAUNCH", "1"), warps)
+
+
 def _partitions(shard_id) -> tuple[int, ...]:
     if shard_id is None:
         return ()
@@ -118,6 +143,7 @@ class Exl3LinearMethod(LinearMethodBase):
             if ok and sum(widths) > _HOPPER_MAX_N:
                 ok, why = False, f"n={sum(widths)} above SGLANG_EXL3_HOPPER_MAX_N={_HOPPER_MAX_N} (lm_head stays on ExLlamaV3's K=6 kernel: 6 bits resident instead of 8)"
             if ok:
+                _apply_kernel_knobs()
                 *tensors, layer.exl3_hopper_ends = hopper.prepare(*mats)
                 for j, t in enumerate(tensors):
                     layer.register_buffer(f"exl3_hopper_{j}", t, persistent=False)

@@ -181,10 +181,21 @@ static void gemm_launch(const half* a_ptr, const void* b_ptr, half* c_ptr, int p
     TORCH_CHECK(kernel != nullptr, "aikido_exl3: kernel not compiled: threads=", cfg.num_threads,
                 " thread_n=", cfg.thread_n, " thread_k=", cfg.thread_k, " m_blocks=", thread_m_blocks, " cb=", cb, " K=", kb);
 
+    // AMPERE: blocks per SM is a per-launch fit, not a hard requirement. With g_blocks_per_sm > 1 the request is honoured
+    // only when this config's shared memory fits that many co-resident blocks (100 KB per SM on sm_86: the rows<=16
+    // families fit 2, the 64-row family and K=6 do not); otherwise the launch silently uses 1 block per SM.
+    const int need = kernel_cache_size(cfg, thread_m_blocks, kb);
     int bps = g_blocks_per_sm;
+    while (bps > 1 && need > max_shared_mem / bps - 1024) bps--;
     int smem = bps > 1 ? max_shared_mem / bps - 1024 : max_shared_mem;
-    TORCH_CHECK(kernel_cache_size(cfg, thread_m_blocks, kb) <= smem, "aikido_exl3: shared memory too small for ", bps,
-                " blocks per SM");
+    if (in_inlaunch && bps > 1) {
+      // a cooperative launch needs every block co-resident: registers, not only shared memory, bound that
+      int occ = 1;
+      cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem);
+      cudaOccupancyMaxActiveBlocksPerMultiprocessor(&occ, kernel, cfg.num_threads, smem);
+      if (occ < bps) { bps = occ > 0 ? occ : 1; smem = bps > 1 ? max_shared_mem / bps - 1024 : max_shared_mem; }
+    }
+    TORCH_CHECK(need <= smem, "aikido_exl3: shared memory too small (", need, " > ", smem, ")");
     cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem);
     // clang-format off
     const int out_flags = (svh && g_out_had_inlaunch && cfg.thread_n % 128 == 0) ? (1 | (out_bf16 ? 2 : 0)) : 0;
