@@ -52,6 +52,10 @@ struct ThreadCfg {
 // Same tables and priority as Marlin.
 static const ThreadCfg small_cfgs[] = {{128, 128, 256}, {64, 128, 128}, {128, 64, 128}};
 static const ThreadCfg large_cfgs[] = {{64, 256, 256}, {64, 128, 128}, {128, 64, 128}};
+// AMPERE: the 9..16-row verify path (thread_m_blocks == 1, m8 == false) runs the non-transposed mb=1 kernels, which
+// cost 134-162 registers at 256 threads -> only 1 co-resident block per SM. The 128-thread configs fit 2 blocks/SM
+// and measure 15-24 % faster at 16 rows on sm_86 (bench/cfg_explore.py), with no change to the <=8-row (m8) path.
+static const ThreadCfg wide_cfgs[] = {{64, 128, 128}, {128, 64, 128}, {128, 128, 256}};
 
 // kb = EXL3 bits per weight; K = 6 is staged like Marlin's 8-bit weights (two 16-byte vectors per lane);
 // K = 3 byte-exact (3 bits per weight staged: 24 words per 16x16 tile, notes/k3-dense-plan.md section 4).
@@ -83,6 +87,7 @@ static bool g_out_had_inlaunch = true;  // knob (set_out_had_inlaunch): output t
 static int g_debug_flags = 0;           // timing probes only (set_debug_flags): 4 = kernels return immediately
 static bool g_in_had_inlaunch = false;  // knob (set_in_had_inlaunch): input transform as a prologue of a COOPERATIVE
                                         // GEMM launch (grid barrier); experimental
+static int g_force_tk = 0, g_force_tn = 0;  // knob (set_force_cfg): per-shape thread config override for the auto path
 
 struct DevState {
   int sms = 0;
@@ -148,6 +153,14 @@ static void gemm_launch(const half* a_ptr, const void* b_ptr, half* c_ptr, int p
     int prob_m_split = par_count > 0 ? (par_count * (max_thread_m_blocks * 16)) : rest_m;
     int thread_m_blocks = std::min((prob_m_split + 15) / 16, max_thread_m_blocks);
     bool m8 = prob_m_split <= 8;
+    // AIKIDO: global per-shape thread-config override (set_force_cfg), honoured only when valid for this shape.
+    if (force_thread_k <= 0 && g_force_tk > 0) {
+      ThreadCfg gc{g_force_tk, g_force_tn,
+                   (g_force_tk == 64 && g_force_tn == 128) || (g_force_tk == 128 && g_force_tn == 64) ? 128 : 256};
+      if (valid_cfg(gc, thread_m_blocks, prob_n, prob_k, kb, max_shared_mem - 512, shard_ends)) {
+        force_thread_k = g_force_tk; force_thread_n = g_force_tn;
+      }
+    }
 
     ThreadCfg cfg{-1, -1, -1};
     if (force_thread_k > 0 && force_thread_n > 0) {
@@ -156,7 +169,7 @@ static void gemm_launch(const half* a_ptr, const void* b_ptr, half* c_ptr, int p
                           ? 128 : 256};
       TORCH_CHECK(valid_cfg(cfg, thread_m_blocks, prob_n, prob_k, kb, max_shared_mem - 512), "aikido_exl3: bad forced config");
     } else {
-      const ThreadCfg* cfgs = thread_m_blocks > 1 ? large_cfgs : small_cfgs;
+      const ThreadCfg* cfgs = thread_m_blocks > 1 ? large_cfgs : (m8 ? small_cfgs : wide_cfgs);
       for (int i = 0; i < 3; i++) {
         if (!valid_cfg(cfgs[i], thread_m_blocks, prob_n, prob_k, kb, max_shared_mem - 512, shard_ends)) continue;
         cfg = cfgs[i];
@@ -533,6 +546,11 @@ void set_blocks_per_sm(int64_t n) {
   aikido_exl3_marlin::g_blocks_per_sm = (int)n;
 }
 
+void set_force_cfg(int64_t tk, int64_t tn) {
+  aikido_exl3_marlin::g_force_tk = (int)tk;
+  aikido_exl3_marlin::g_force_tn = (int)tn;
+}
+
 std::vector<int64_t> device_info(int64_t device) {
   auto& st = aikido_exl3_marlin::dev_state((int)device);
   int occ = -1;
@@ -556,6 +574,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "fused group of EXL3 linears sharing the input (q/k/v, gate/up): 2 launches for the whole group");
   m.def("init_device", &init_device, "allocate per-device state (locks, fp32 reduce scratch)");
   m.def("set_blocks_per_sm", &set_blocks_per_sm, "tuning knob: co-resident thread blocks per SM (default 1)");
+  m.def("set_force_cfg", &set_force_cfg, "tuning knob: force auto-path thread config (thread_k, thread_n); 0 = auto");
   m.def("set_out_had_inlaunch", &set_out_had_inlaunch,
         "knob: output Hadamard inside the GEMM launch (default) or as a separate launch; same bits either way");
   m.def("set_in_had_inlaunch", &set_in_had_inlaunch,

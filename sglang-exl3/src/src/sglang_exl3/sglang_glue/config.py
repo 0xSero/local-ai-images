@@ -46,7 +46,10 @@ class Exl3Config(QuantizationConfig):
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "Exl3Config":
         hf_config = config.get("hf_config")
-        path = os.environ.get(_MODEL_PATH_ENV) or getattr(hf_config, "_name_or_path", None)
+        # A draft checkpoint (EXL3 DFlash draft) carries its own manifest: its local directory wins over the env var,
+        # which names the target checkpoint.
+        hf_path = getattr(hf_config, "_name_or_path", None)
+        path = hf_path if hf_path and os.path.isdir(hf_path) else (os.environ.get(_MODEL_PATH_ENV) or hf_path)
         if path and not os.path.isdir(path):
             # HF repo id: resolve the local snapshot without downloading
             try:
