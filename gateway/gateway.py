@@ -14,6 +14,12 @@ Auth: when GATEWAY_KEY_FILE names a non-empty file, every request must carry
 its value as `Authorization: Bearer <key>` or `x-api-key: <key>`. The file is
 read on each request, so the plugin can rotate the key without a restart.
 
+Usage: when GATEWAY_USAGE_LOG names a file, one JSON line per answered
+request is appended to it: {t, api, model, prompt, completion, estimated,
+ttft_ms, ms}. Tokens come from the engine's usage block when it sends one,
+otherwise one per streamed delta (estimated: true). The plugin reads the file
+for the tokens-per-day and decode-speed figures on the card.
+
 Standard library only. No configuration beyond the environment above.
 """
 
@@ -32,6 +38,8 @@ PORT = int(os.environ.get("GATEWAY_PORT", "12434"))
 KEY_FILE = os.environ.get("GATEWAY_KEY_FILE", "")
 MODEL_ALIAS = os.environ.get("MODEL", "")  # served model id; client model names are mapped onto it
 TIMEOUT = int(os.environ.get("UPSTREAM_TIMEOUT", "600"))
+USAGE_LOG = os.environ.get("GATEWAY_USAGE_LOG", "")
+USAGE_LOCK = threading.Lock()
 
 
 def log(msg):
@@ -46,6 +54,38 @@ def required_key():
             return handle.read().strip()
     except OSError:
         return ""
+
+
+class Meter:
+    """One answer's accounting: tokens from the engine's usage when it sends one, else one per delta; time to first token."""
+
+    def __init__(self, api, model):
+        self.api, self.model, self.t0 = api, model, time.monotonic()
+        self.first, self.counted, self.usage = None, 0, None
+
+    def chunk(self, obj):
+        if obj.get("usage"):
+            self.usage = obj["usage"]
+        for choice in obj.get("choices") or []:
+            delta = choice.get("delta") or {}
+            if delta.get("content") or delta.get("reasoning_content") or delta.get("reasoning") or delta.get("tool_calls"):
+                if self.first is None:
+                    self.first = time.monotonic()
+                self.counted += 1
+
+    def done(self, usage=None):
+        if not USAGE_LOG:
+            return
+        usage = usage or self.usage or {}
+        now = time.monotonic()
+        row = {"t": int(time.time()), "api": self.api, "model": self.model, "prompt": usage.get("prompt_tokens", 0),
+               "completion": usage.get("completion_tokens") or self.counted, "estimated": not usage,
+               "ttft_ms": int(((self.first or now) - self.t0) * 1000), "ms": int((now - self.t0) * 1000)}
+        try:
+            with USAGE_LOCK, open(USAGE_LOG, "a") as handle:
+                handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+        except OSError:
+            pass
 
 
 # ----------------------------------------------------------------------------- upstream
@@ -241,7 +281,7 @@ def chat_to_anthropic(resp, model):
     }
 
 
-def anthropic_stream(handler, upstream, model):
+def anthropic_stream(handler, upstream, model, meter=None):
     """Translate chat SSE deltas into the Anthropic event stream."""
     def event(name, data):
         handler.wfile.write(f"event: {name}\ndata: {json.dumps(data)}\n\n".encode())
@@ -257,6 +297,8 @@ def anthropic_stream(handler, upstream, model):
     finish = None
     usage = {}
     for chunk in upstream.stream():
+        if meter:
+            meter.chunk(chunk)
         if chunk.get("usage"):
             usage = chunk["usage"]
         for choice in chunk.get("choices") or []:
@@ -290,6 +332,8 @@ def anthropic_stream(handler, upstream, model):
     event("message_delta", {"type": "message_delta", "delta": {"stop_reason": anthropic_stop(finish, bool(tools)), "stop_sequence": None},
                             "usage": {"output_tokens": usage.get("completion_tokens", 0)}})
     event("message_stop", {"type": "message_stop"})
+    if meter:
+        meter.done(usage)
 
 
 # ----------------------------------------------------------------------------- OpenAI Responses -> chat
@@ -369,7 +413,7 @@ def chat_to_responses(resp, model, req):
     return envelope
 
 
-def responses_stream(handler, upstream, model, req):
+def responses_stream(handler, upstream, model, req, meter=None):
     """Translate chat SSE deltas into the Responses event stream Codex consumes."""
     sequence = [0]
 
@@ -388,6 +432,8 @@ def responses_stream(handler, upstream, model, req):
     calls = {}  # chat index -> {"index", "id", "call_id", "name", "arguments"}
     usage = {}
     for chunk in upstream.stream():
+        if meter:
+            meter.chunk(chunk)
         if chunk.get("usage"):
             usage = chunk["usage"]
         for choice in chunk.get("choices") or []:
@@ -432,6 +478,8 @@ def responses_stream(handler, upstream, model, req):
                      "usage": {"input_tokens": usage.get("prompt_tokens", 0), "output_tokens": usage.get("completion_tokens", 0),
                                "total_tokens": usage.get("total_tokens", 0), "input_tokens_details": {"cached_tokens": 0}, "output_tokens_details": {"reasoning_tokens": 0}}})
     event("response.completed", {"response": envelope})
+    if meter:
+        meter.done(usage)
 
 
 def finish_text(event, text_item, output):
@@ -512,7 +560,12 @@ class Handler(BaseHTTPRequestHandler):
                     body["tools"] = scrub_schema(body["tools"])
                 if MODEL_ALIAS:
                     body["model"] = MODEL_ALIAS
-                return self.passthrough("POST", "/v1/chat/completions", body)
+                hide = False
+                if USAGE_LOG and body.get("stream"):  # ask the engine for its token counts; the client sees them only if it asked
+                    options = body.get("stream_options") if isinstance(body.get("stream_options"), dict) else {}
+                    hide = not options.get("include_usage")
+                    body["stream_options"] = dict(options, include_usage=True)
+                return self.passthrough("POST", "/v1/chat/completions", body, hide)
             if path in ("/v1/messages", "/messages"):
                 return self.handle_messages(body)
             if path in ("/v1/messages/count_tokens", "/messages/count_tokens"):
@@ -529,22 +582,52 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(502, {"error": {"type": "api_error", "message": f"engine unavailable: {error}"}})
         self.send_json(404, {"error": {"type": "not_found", "message": path}})
 
-    def passthrough(self, method, path, body):
-        up = Upstream(method, path, body)
+    def passthrough(self, method, path, body, hide_usage=False):
+        meter = Meter("chat", (body or {}).get("model") or MODEL_ALIAS) if path.endswith("/chat/completions") else None
+        up = Upstream(method, path, body)  # returns once the engine has answered the headers: after the whole answer when not streamed
         if body and body.get("stream") and up.status == 200:
             self.start_sse()
             try:
-                # copy the engine's SSE bytes verbatim
+                # forward the engine's SSE line by line, metering the deltas as they pass; the usage-only
+                # chunk this gateway asked for is dropped when the client did not ask for it
+                pending = b""
                 while True:
                     chunk = up.response.read1(65536) if hasattr(up.response, "read1") else up.response.read(65536)
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    pending += chunk
+                    out = b""
+                    while b"\n" in pending:
+                        raw_line, pending = pending.split(b"\n", 1)
+                        line = raw_line.strip()
+                        if line.startswith(b"data:") and line[5:].strip() != b"[DONE]":
+                            try:
+                                obj = json.loads(line[5:])
+                            except json.JSONDecodeError:
+                                obj = None
+                            if isinstance(obj, dict):
+                                if meter:
+                                    meter.chunk(obj)
+                                if hide_usage and obj.get("usage") and not obj.get("choices"):
+                                    continue
+                        out += raw_line + b"\n"
+                    if out:
+                        self.wfile.write(out)
+                        self.wfile.flush()
+                if pending:
+                    self.wfile.write(pending)
                     self.wfile.flush()
             finally:
                 up.conn.close()
+            if meter:
+                meter.done()
             return
         raw = up.raw()
+        if meter and up.status == 200:
+            try:
+                meter.done(json.loads(raw).get("usage"))
+            except (ValueError, AttributeError):
+                meter.done()
         self.send_response(up.status)
         self.send_header("Content-Type", up.response.getheader("Content-Type") or "application/json")
         self.send_header("Content-Length", str(len(raw)))
@@ -554,40 +637,46 @@ class Handler(BaseHTTPRequestHandler):
     def handle_messages(self, body):
         model = body.get("model") or MODEL_ALIAS
         chat = anthropic_to_chat(body)
+        meter = Meter("messages", MODEL_ALIAS or model)
         if chat.get("stream"):
             chat["stream_options"] = {"include_usage": True}
             up = Upstream("POST", "/v1/chat/completions", chat)
             if up.status != 200:
                 return self.send_json(up.status, {"error": {"type": "api_error", "message": up.raw().decode(errors="replace")[:500]}})
             self.start_sse()
-            anthropic_stream(self, up, model)
+            anthropic_stream(self, up, model, meter)
             return
         up = Upstream("POST", "/v1/chat/completions", chat)
         if up.status != 200:
             return self.send_json(up.status, {"error": {"type": "api_error", "message": up.raw().decode(errors="replace")[:500]}})
-        self.send_json(200, chat_to_anthropic(up.json(), model))
+        resp = up.json()
+        meter.done(resp.get("usage"))
+        self.send_json(200, chat_to_anthropic(resp, model))
 
     def handle_responses(self, body):
         model = body.get("model") or MODEL_ALIAS
         chat = responses_to_chat(body)
+        meter = Meter("responses", MODEL_ALIAS or model)
         if chat.get("stream"):
             chat["stream_options"] = {"include_usage": True}
             up = Upstream("POST", "/v1/chat/completions", chat)
             if up.status != 200:
                 return self.send_json(up.status, {"error": {"type": "server_error", "message": up.raw().decode(errors="replace")[:500]}})
             self.start_sse()
-            responses_stream(self, up, model, body)
+            responses_stream(self, up, model, body, meter)
             return
         up = Upstream("POST", "/v1/chat/completions", chat)
         if up.status != 200:
             return self.send_json(up.status, {"error": {"type": "server_error", "message": up.raw().decode(errors="replace")[:500]}})
-        self.send_json(200, chat_to_responses(up.json(), model, body))
+        resp = up.json()
+        meter.done(resp.get("usage"))
+        self.send_json(200, chat_to_responses(resp, model, body))
 
 
 def main():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     server.daemon_threads = True
-    log(f"gateway listening on :{PORT}, engine {UPSTREAM}, key {'required' if required_key() else 'not set'}")
+    log(f"gateway listening on :{PORT}, engine {UPSTREAM}, key {'required' if required_key() else 'not set'}, usage log {USAGE_LOG or 'off'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

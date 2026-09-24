@@ -99,7 +99,7 @@ def call(path, body=None, key=KEY, stream=False):
                 events = []
                 for line in response:
                     line = line.decode().strip()
-                    if line.startswith("data:"):
+                    if line.startswith("data:") and line[5:].strip() != "[DONE]":
                         events.append(json.loads(line[5:].strip()))
                 return response.status, events
             return response.status, json.loads(response.read())
@@ -125,7 +125,9 @@ def main():
     threading.Thread(target=engine.serve_forever, daemon=True).start()
     key_file = tempfile.NamedTemporaryFile("w", delete=False)
     key_file.write(KEY + "\n"); key_file.close()
-    env = dict(os.environ, UPSTREAM=f"http://127.0.0.1:{ENGINE_PORT}", GATEWAY_PORT=str(GATEWAY_PORT), GATEWAY_KEY_FILE=key_file.name, MODEL="fake-model")
+    usage_log = os.path.join(tempfile.mkdtemp(), "usage.jsonl")
+    env = dict(os.environ, UPSTREAM=f"http://127.0.0.1:{ENGINE_PORT}", GATEWAY_PORT=str(GATEWAY_PORT), GATEWAY_KEY_FILE=key_file.name, MODEL="fake-model",
+               GATEWAY_USAGE_LOG=usage_log)
     gateway = subprocess.Popen([sys.executable, os.path.join(HERE, "gateway.py")], env=env, stderr=subprocess.PIPE)
     try:
         for _ in range(50):
@@ -228,6 +230,19 @@ def main():
             check(f"{path}: image URL preserved", status == 200 and image["url"] == "https://example.com/image.png" and (path.endswith("messages") or image["detail"] == "low"))
         status, body = call("/v1/responses", {"model": "test", "input": [{"role": "user", "content": [{"type": "input_image", "file_id": "unavailable"}]}]})
         check("unsupported image reference fails explicitly", status == 400 and body["error"]["type"] == "invalid_request_error")
+        # streamed chat: the engine is asked for usage, the client only sees it when it asked
+        status, events = call("/v1/chat/completions", {"model": "m", "stream": True, "messages": [{"role": "user", "content": "hi"}]}, stream=True)
+        check("stream: engine is asked for usage", FakeEngine.last_request.get("stream_options") == {"include_usage": True}, str(FakeEngine.last_request.get("stream_options")))
+        check("stream: the usage chunk is hidden from a client that did not ask", status == 200 and not any(e.get("usage") and not e.get("choices") for e in events) and any(e.get("choices") for e in events), str(events[-2:]))
+        status, events = call("/v1/chat/completions", {"model": "m", "stream": True, "stream_options": {"include_usage": True}, "messages": [{"role": "user", "content": "hi"}]}, stream=True)
+        check("stream: a client that asked for usage gets it", any(e.get("usage") and not e.get("choices") for e in events), str(events[-2:]))
+        # usage log: one line per answered request, tokens from the engine's usage block
+        time.sleep(0.2)
+        rows = [json.loads(line) for line in open(usage_log)]
+        apis = {row["api"] for row in rows}
+        check("usage log: every dialect is recorded", apis == {"chat", "messages", "responses"}, str(apis))
+        check("usage log: engine usage is used verbatim, streamed chat included", all(row["completion"] == 4 and row["prompt"] == 10 and not row["estimated"] for row in rows), str([r for r in rows if r["estimated"] or r["prompt"] != 10][:3]))
+        check("usage log: model, timing and time-to-first-token are present", all(row["model"] == "fake-model" and row["ms"] >= row["ttft_ms"] >= 0 for row in rows), str(rows[:1]))
         print(f"# {passed} passed")
     finally:
         gateway.terminate()
