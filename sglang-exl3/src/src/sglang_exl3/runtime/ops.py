@@ -28,6 +28,10 @@ HOPPER_DENSE_ROWS = int(os.environ.get("SGLANG_EXL3_HOPPER_DENSE_ROWS", "256"))
 HOPPER_DENSE_CACHED_ROWS = int(os.environ.get("SGLANG_EXL3_HOPPER_DENSE_CACHED_ROWS", "48"))
 _HOPPER_DENSE = os.environ.get("SGLANG_EXL3_HOPPER_DENSE", "1") == "1"
 _HOPPER_DENSE_MAX_N = 65536     # lm_head-sized outputs keep the column-sliced reference path (bounded transients)
+# Prefill GEMM accumulation. GeForce Ampere runs fp16 tensor-core MMA at 2x the rate with fp16 accumulate (3090, 27B
+# linear shapes at 8192 rows: 70 TFLOPS fp32-acc vs 120 TFLOPS fp16-acc, bench/prefill_gemm_ceiling.py). The error
+# class (4e-3 rel. vs fp64 at K=17408) is the one ExLlamaV3's own trellis kernels have (2-8e-3). Opt-in.
+_PREFILL_ACC16 = os.environ.get("SGLANG_EXL3_PREFILL_FP16_ACC", "0") == "1"
 
 
 def dense_group(x: torch.Tensor, trellis: list[torch.Tensor], suh_cat: torch.Tensor, svh: list[torch.Tensor],
@@ -41,12 +45,18 @@ def dense_group(x: torch.Tensor, trellis: list[torch.Tensor], suh_cat: torch.Ten
     rows = x.shape[0]
     xh = hopper.had_in_group(x, suh_cat)
     col0 = 0
-    for i, (t, sv) in enumerate(zip(trellis, svh)):
-        w = weights[i] if weights is not None else reference.reconstruct(t, codebook)
-        y = torch.mm(xh[i * rows:(i + 1) * rows], w)
-        del w
-        hopper.had_out_into(y, sv, out, col0)
-        col0 += y.shape[1]
+    mm = torch.backends.cuda.matmul
+    prev = mm.allow_fp16_accumulation
+    mm.allow_fp16_accumulation = _PREFILL_ACC16 or prev
+    try:
+        for i, (t, sv) in enumerate(zip(trellis, svh)):
+            w = weights[i] if weights is not None else reference.reconstruct(t, codebook)
+            y = torch.mm(xh[i * rows:(i + 1) * rows], w)
+            del w
+            hopper.had_out_into(y, sv, out, col0)
+            col0 += y.shape[1]
+    finally:
+        mm.allow_fp16_accumulation = prev
     return out
 
 

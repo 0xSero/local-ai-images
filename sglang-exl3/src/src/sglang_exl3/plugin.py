@@ -27,6 +27,17 @@ def activate() -> None:
     _patch_dflash_exl3_draft()
     if os.environ.get("SGLANG_EXL3_EMBED_HOST", "0") == "1":
         _patch_host_embedding()
+    if os.environ.get("SGLANG_EXL3_VIT_SDPA", "0") == "1":
+        from .sglang_glue import vit_attn
+        vit_attn.install()
+        logger.info("sglang-exl3: vision attention 'triton_attn' served by per-segment SDPA (flash/efficient)")
+    if os.environ.get("SGLANG_EXL3_MM_FAST_CPU", "0") == "1":
+        from .sglang_glue import vit_attn
+        vit_attn.install_fast_processor_cpu()
+    if int(os.environ.get("SGLANG_EXL3_VIT_MLP_CHUNK", "0")) > 0:
+        from .sglang_glue import vit_attn
+        vit_attn.install_mlp_chunk(int(os.environ["SGLANG_EXL3_VIT_MLP_CHUNK"]))
+        logger.info("sglang-exl3: vision MLP row-chunked at %s rows", os.environ["SGLANG_EXL3_VIT_MLP_CHUNK"])
     logger.info("sglang-exl3: registered quantization method 'exl3'")
 
 
