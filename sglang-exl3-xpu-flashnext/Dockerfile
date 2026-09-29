@@ -30,8 +30,8 @@ LABEL ai.omarchy.model.repo="turboderp/Qwen3.8-Flash-Next-exl3"
 LABEL ai.omarchy.model.revision="69e33439ae950f17bcbe95c98f117d80f759ab6d"
 
 ARG TRELLIS_SERVE_REPO=https://github.com/0xSero/trellis-serve
-ARG TRELLIS_SERVE_COMMIT=13f7ac16da227e52d6a5cdc93426cdf1d448b7c3
-LABEL ai.omarchy.trellis-serve.commit="13f7ac16da227e52d6a5cdc93426cdf1d448b7c3"
+ARG TRELLIS_SERVE_COMMIT=72fd2d4ca8e8de3fce03ab09e3ed1692957c2f8c
+LABEL ai.omarchy.trellis-serve.commit="72fd2d4ca8e8de3fce03ab09e3ed1692957c2f8c"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
