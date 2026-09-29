@@ -1,8 +1,8 @@
 # ghcr.io/0xsero/sglang-exl3-xpu-flashnext: Qwen3.8-Flash-Next EXL3 (3.05bpw_h5_ng5) on ONE Intel Arc Pro B70
 # (Xe2 / Battlemage) through SGLang v0.5.20-xpu, with two-tier offload: routed experts in USM host RAM behind a
 # device-managed expert cache (9,000 slots), and the 32.6 GB EXL3 n-gram table on NVMe behind an 8 GB RAM row
-# cache. The serving code is trellis-serve (github.com/0xSero/trellis-serve, branch ft-xpu_bmg) at the commit the
-# campaign measured last (X008 final check, 2026-09-29).
+# cache. The serving code is trellis-serve (github.com/0xSero/trellis-serve, branch ft-xpu-vision) at 72fd2d4: the
+# X008 NVMe-tier build (13f7ac1) plus EXL3_SYNC_LOGITS and image input on XPU kernels (XVIS20, 2026-09-29).
 #
 # Base is lmsysorg/sglang:v0.5.20-xpu by digest (linux/amd64 index, inspected 2026-09-29; the same digest the
 # campaign's B70 containers ran). It carries torch 2.13 XPU, oneAPI (icpx 2026.0) and Level Zero.
