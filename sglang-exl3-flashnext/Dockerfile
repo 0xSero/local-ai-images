@@ -66,7 +66,7 @@ ENV PYTHONPATH=/opt/trellis-serve/cuda/csrc/build/lib \
 
 # Pre-build the offload runtime's JIT extension (no host-specific flags) and prove every AOT module imports
 # (CPU only: no GPU is needed to load the extensions).
-RUN python3 -c "import torch, trellis_exl3_kernels, trellis_exl3_moe_kernels; \
-from sglang_exl3.offload import _ext; _ext.load(); print('trellis-serve kernels ok')"
+RUN python3 -c "import torch, trellis_exl3_kernels, trellis_exl3_moe_kernels, importlib; \
+importlib.import_module('sglang_exl3.offload._ext').load(); print('trellis-serve kernels ok')"
 
 # Entrypoint (/opt/entrypoint.sh shim), ports 30000/22 and openssh are inherited from the base.
