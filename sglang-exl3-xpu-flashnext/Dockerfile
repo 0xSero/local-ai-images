@@ -44,6 +44,15 @@ RUN git init -q /opt/trellis-serve \
  && echo "${TRELLIS_SERVE_COMMIT}" > /opt/trellis-serve/COMMIT \
  && rm -rf .git
 
+# FFmpeg 6 shared libraries (Ubuntu 24.04: libavutil58 / libavcodec60 ...) for torchcodec 0.13, which SGLang uses to
+# decode video input; the base ships torchcodec without FFmpeg, so video requests failed ("Could not load
+# libtorchcodec"). Libraries only, no ffmpeg CLI. The build fails if torchcodec still cannot load them.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libavutil58 libavcodec60 libavformat60 libavdevice60 libavfilter9 \
+      libswscale7 libswresample4 \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -c "import torchcodec.decoders; print('torchcodec loads FFmpeg')"
+
 # oneDNN: runtime (libdnnl.so.3 into the venv) and headers for build_ext.sh's EXL3_DNNL path.
 RUN pip install -q --no-deps onednn==2026.0.0 onednn-devel==2026.0.0
 
