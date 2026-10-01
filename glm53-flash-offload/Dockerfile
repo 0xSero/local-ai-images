@@ -48,8 +48,8 @@ RUN git clone https://github.com/turboderp-org/exllamav3 /opt/exllamav3-src \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG GLM53_REPO=https://github.com/0xSero/glm53-flash-offload
-ARG GLM53_COMMIT=c4b9160bdbd3bdbda9b2d50b763332c8580280fb
-LABEL ai.omarchy.glm53-flash-offload.commit="c4b9160bdbd3bdbda9b2d50b763332c8580280fb"
+ARG GLM53_COMMIT=fe97bcf846347d035859a0610cebbb707fa36caa
+LABEL ai.omarchy.glm53-flash-offload.commit="fe97bcf846347d035859a0610cebbb707fa36caa"
 RUN git init -q /opt/glm53 \
  && cd /opt/glm53 \
  && git fetch -q --depth 1 "${GLM53_REPO}" "${GLM53_COMMIT}" \
