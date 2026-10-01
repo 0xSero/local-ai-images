@@ -2,15 +2,16 @@
 # RTX 3090 (sm_86) + host DDR4, OpenAI-compatible API on :30000. Serving code: github.com/0xSero/glm53-flash-offload
 # at the pinned commit below (monkeypatches over stock exllamav3 1.5.1: pinned zero-copy home copy of all routed
 # experts, elastic CLOCK GPU expert cache + prefill staging, AVX2 CPU tier for cold decode misses).
-#   GLM53_MODE=fast  (default) campaign run C056: prefill 8k 626 / 32k 808 tok/s, decode C1 27.2 / C4 34.7 agg,
-#                    KV 131,072; prefill exact, decode with the CPU tier NOT exact (paired KL 0.0053, top-1 0.977;
-#                    fix in progress); host RAM ~218 GiB
+#   GLM53_MODE=fast  (default) campaign run G067: prefill 8k 710 / 32k 951 tok/s, decode C1 28.15 / C2 31.57 /
+#                    C4 33.98 agg, KV 131,072; prefill exact (panel 1.0000 / KL 0), decode NOT exact (CPU tier: paired
+#                    KL 0.0053, top-1 0.977; fix in progress); host RAM ~218 GiB
 #   GLM53_MODE=exact run G066a: prefill 697 / 945, decode ~12.6, bit-exact with exllamav3; host RAM ~111 GiB
 #
 # Base = the stack the numbers were measured on: lmsysorg/sglang v0.5.20 (CUDA 13.0, torch, Triton, nvcc; same digest
 # as ./sglang-exl3) + exllamav3 v1.5.1 (tag commit 958ec93) built from source for sm_86 (binaries also run on sm_89).
-# Baked in: the repo's routing stats, exllamav3 MoE tune cache, the measured run's Triton cache + autotune pins, and
-# pre-built torch extensions (GPU expert-cache kernels; CPU tier host -mavx2 -mfma -mf16c + GPU split/combine).
+# Baked in: the repo's routing stats, exllamav3 MoE tune cache, the exact Triton autotune pins (empty Triton cache, no
+# benchmarking), and pre-built torch extensions (expert cache, CPU tier host -mavx2 -mfma -mf16c + GPU split/combine,
+# fast split, fused hyper-connection kernels).
 # The model is NOT in the image: mount the checkpoint at /models, or mount an empty writable dir there and the
 # entrypoint downloads turboderp/GLM-5.3-Flash-exl3 @ 332ab457 (branch 3.05bpw, 125.3 GB).
 #
@@ -47,8 +48,8 @@ RUN git clone https://github.com/turboderp-org/exllamav3 /opt/exllamav3-src \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG GLM53_REPO=https://github.com/0xSero/glm53-flash-offload
-ARG GLM53_COMMIT=d23bbb96ac6e47c8ba93b6155279a2ea69981929
-LABEL ai.omarchy.glm53-flash-offload.commit="d23bbb96ac6e47c8ba93b6155279a2ea69981929"
+ARG GLM53_COMMIT=35ade4fe9531a78f93598c9abcbfd24b5ce750dc
+LABEL ai.omarchy.glm53-flash-offload.commit="35ade4fe9531a78f93598c9abcbfd24b5ce750dc"
 RUN git init -q /opt/glm53 \
  && cd /opt/glm53 \
  && git fetch -q --depth 1 "${GLM53_REPO}" "${GLM53_COMMIT}" \
@@ -61,7 +62,7 @@ RUN git init -q /opt/glm53 \
 
 ENV GLM53_MODE=fast \
     GLM53_ZC_STATS=/opt/glm53/data/stats_own_dec.json GLM53_EC_WARM=/opt/glm53/data/stats_own_dec.json \
-    GLM53_TRITON_PIN=/opt/glm53/data/triton_pin_c056.json \
+    GLM53_TRITON_PIN=/opt/glm53/data/triton_pin_exact.json \
     EXLLAMAV3_TUNE_CACHE=/opt/glm53/data/coop_autotune_1gpu.bin TRITON_CACHE_DIR=/opt/glm53/triton_cache
 
 EXPOSE 30000
