@@ -10,6 +10,13 @@ on:
         description: tag to publish alongside the digest
         required: true
         default: v1
+      platform:
+        description: target architecture (native runner)
+        type: choice
+        options:
+          - linux/amd64
+          - linux/arm64
+        default: linux/amd64
       sbom:
         description: attach an SBOM; disable for images whose package tree exceeds the 40 MB attestation limit
         required: false
@@ -34,7 +41,7 @@ permissions:
 jobs:
   build:
     if: inputs.smoke != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - name: Free runner disk
         run: |
@@ -107,7 +114,7 @@ jobs:
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: ./${{ inputs.image }}
-          platforms: linux/amd64
+          platforms: ${{ inputs.platform || 'linux/amd64' }}
           push: true
           tags: ghcr.io/0xsero/${{ inputs.image }}:${{ inputs.tag }}
           provenance: mode=max
