@@ -4,9 +4,10 @@
 # D118: staged-DMA prefill (16k chunks, copy-engine staging, FP16 GEMM for busy experts), AVX2 CPU expert tier for
 # decode misses, elastic VRAM expert mirror cache, Engram n-gram tables memory-mapped from NVMe.
 #   measured (max-model-len 65536, KV 1 GiB): D061 prefill 8k 565 / 32k 745 tok/s; D107 decode C1 21.34 / C2 26.27 /
-#   C4 28.30 agg; D117 (D061 + non-elastic cache) prefill 575 / 766, decode C1 15.55; D118 pending.
+#   C4 28.30 agg; D117 (D061 + non-elastic cache) prefill 575 / 766, decode C1 15.55.
 #   prefill fidelity (D061 path) vs the D026 reference: top-1 0.9856, mean KL 0.0068 nats (inherited guard: fail).
-#   host RAM ~200 GiB pinned. Default launch: --max-model-len 262144 + KV 4.5 GiB (not yet GPU-validated).
+#   D119 (this default: --max-model-len 262144, KV 1.5 GiB) C1 prefill/decode 32k 774.6/19.42, 65k 813.2/20.51, 261k 764.1/20.59;
+#   container RAM peak 212.1 GiB (256 GiB host), NVMe 488 GB free, VRAM 21,852 MiB.
 #
 # Base + upstream pins = the campaign runtime image dsv41-exl3:ampere-d005 (run D005) as one Dockerfile:
 #   lazymio/vllm-backport v0.13.0 amd64 (vLLM 0.13.0 with DeepSeek-V4.1, torch 2.13.0+cu130, CUDA 13.0)
@@ -55,8 +56,8 @@ RUN git clone -q https://github.com/turboderp-org/exllamav3.git /opt/exllamav3 \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG DSV41_REPO=https://github.com/0xSero/dsv41-flash-offload
-ARG DSV41_COMMIT=5776abf615c0155a1546f02336b9237a2b526ee8
-LABEL ai.omarchy.dsv41-flash-offload.commit="5776abf615c0155a1546f02336b9237a2b526ee8"
+ARG DSV41_COMMIT=2e9da5ecdab37c232c2da887e25c33a99da738d3
+LABEL ai.omarchy.dsv41-flash-offload.commit="2e9da5ecdab37c232c2da887e25c33a99da738d3"
 RUN git init -q /opt/dsv41 && cd /opt/dsv41 \
  && git fetch -q --depth 1 "${DSV41_REPO}" "${DSV41_COMMIT}" \
  && git checkout -q --detach FETCH_HEAD \
