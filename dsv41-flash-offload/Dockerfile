@@ -55,8 +55,8 @@ RUN git clone -q https://github.com/turboderp-org/exllamav3.git /opt/exllamav3 \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG DSV41_REPO=https://github.com/0xSero/dsv41-flash-offload
-ARG DSV41_COMMIT=5dbeb4b563a101a627cc675206bb93342cf38ee3
-LABEL ai.omarchy.dsv41-flash-offload.commit="5dbeb4b563a101a627cc675206bb93342cf38ee3"
+ARG DSV41_COMMIT=5776abf615c0155a1546f02336b9237a2b526ee8
+LABEL ai.omarchy.dsv41-flash-offload.commit="5776abf615c0155a1546f02336b9237a2b526ee8"
 RUN git init -q /opt/dsv41 && cd /opt/dsv41 \
  && git fetch -q --depth 1 "${DSV41_REPO}" "${DSV41_COMMIT}" \
  && git checkout -q --detach FETCH_HEAD \
