@@ -12,8 +12,18 @@ set -euo pipefail
 : "${MAX_JOBS:=10}" "${NVCC_THREADS:=1}" "${VLLM_VERSION:=0.26.1rc0+glm53.r38.sm121}"
 export MAX_JOBS NVCC_THREADS
 # The base image ships the CUDA math headers (cusparse.h, ...) only in the cu13 pip wheel, not in /usr/local/cuda;
-# torch's ATen headers need them (deepgemm, exllamav3_ext).
-export CPATH=/usr/local/lib/python3.12/dist-packages/nvidia/cu13/include${CPATH:+:$CPATH}
+# torch's ATen headers need them (deepgemm, exllamav3_ext). Expose ONLY the headers the toolkit lacks: the pip tree
+# also carries nvidia-cuda-crt / cccl 13.4 headers (crt/host_runtime.h, cccl/...), and CPATH is searched before the
+# `-isystem /usr/local/cuda/include` that vLLM's CMake passes, so putting the whole pip include dir on CPATH makes
+# nvcc 13.0's generated stubs include the 13.4 crt headers ("macro __cudaLaunch passed 2 arguments, but takes just 1").
+NV_PIP_INC=/usr/local/lib/python3.12/dist-packages/nvidia/cu13/include
+NV_EXTRA_INC=/opt/cu13-extra-include
+mkdir -p "$NV_EXTRA_INC"
+for f in "$NV_PIP_INC"/*; do
+  b=$(basename "$f"); [ -e "/usr/local/cuda/include/$b" ] || ln -sfn "$f" "$NV_EXTRA_INC/$b"
+done
+test -e "$NV_EXTRA_INC/cusparse.h" && test ! -e "$NV_EXTRA_INC/crt"
+export CPATH=$NV_EXTRA_INC${CPATH:+:$CPATH}
 mkdir -p /out
 # CMake FetchContent clones cutlass, flash-attention, FlashMLA, ... (the base image has no git)
 command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends git >/dev/null; }
@@ -44,7 +54,7 @@ fi
 if [ "${SKIP_EXL3:-0}" != 1 ]; then
   cd /src/exllamav3
   t0=$(date +%s)
-  TORCH_CUDA_ARCH_LIST=12.1 MAX_JOBS=8 \
+  TORCH_CUDA_ARCH_LIST=12.1 MAX_JOBS="${EXL3_MAX_JOBS:-$MAX_JOBS}" \
     python3 -m pip wheel -v --no-build-isolation --no-deps -w /out . > /logs/exl3-wheel.log 2>&1
   ls /out/exllamav3-*.whl
   echo "exllamav3 wheel built in $(( $(date +%s) - t0 ))s"
