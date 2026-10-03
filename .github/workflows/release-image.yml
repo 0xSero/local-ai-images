@@ -52,6 +52,14 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
           sudo docker system prune -af
           df -h /
+      - name: Add swap (arm64 CUDA compiles)
+        # ubuntu-24.04-arm has 16 GB RAM and 3 GB swap; vLLM's heavy CUTLASS/Marlin TUs peak above that at
+        # MAX_JOBS=4 (measured ~15.5 GB RAM + 13.5 GB swap), and the OOM killer would take out cicc.
+        if: inputs.platform == 'linux/arm64'
+        run: |
+          sudo fallocate -l 24G /swapfile-build && sudo chmod 600 /swapfile-build
+          sudo mkswap /swapfile-build && sudo swapon /swapfile-build
+          free -m
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Verify pins
         run: |
