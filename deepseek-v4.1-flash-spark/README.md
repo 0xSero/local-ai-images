@@ -5,16 +5,21 @@ trellis routed experts, served by vLLM with tensor parallel 2 across **two NVIDI
 arm64, 128 GB unified memory each) linked by their RoCE fabric. It exposes an OpenAI-compatible API on :8000 with
 deepseek_v41 reasoning and tool-call parsing, image input (1 image per prompt), and a 262,144-token context.
 
-The image is **linux/arm64 only**. Its architecture-specific vLLM and EXL3 kernels target GB10; FlashAttention 2 retains its upstream `8.0+PTX` fallback. Hopper-only FlashAttention 3 is excluded. The image is intended for DGX Spark.
+The image is **linux/arm64 only**. Its architecture-specific vLLM and EXL3 kernels target GB10; FlashAttention 2 retains its upstream `8.0+PTX` fallback. The image is intended for DGX Spark.
 
 ## Published image
 
 | | |
 |---|---|
-| image | `ghcr.io/0xsero/deepseek-v4.1-flash-spark@sha256:5668e35e5ee021da4b9ce88a1964caf0e082e8ca01d81d1d64b6213a55c6add5` (tags `s016`, `latest`) |
-| visibility | **public** package (anonymous `docker pull` works) |
-| built by | `spark/host-build.sh` + `spark/overlay.Dockerfile` on a DGX Spark (local tag `sovereign-trellis/ds41-exl3-spark:v41fix3`, image id `afe81121ca2a`), pushed from host spark-557f with `docker push` |
-| attestation | **none**. This digest was not built by `release-image.yml`, so it has no BuildKit provenance, SBOM or `gh attestation`. A CI build of `./Dockerfile` (below) replaces it, and the registry recipe stays `candidate` until then. |
+| image | `ghcr.io/0xsero/deepseek-v4.1-flash-spark@sha256:3cbc8ec016f5fbfc82eba3480de12399cbce31e7b76aa3108b8fe8246c42a79d` (tag `s016-ci`) |
+| visibility | **public**; anonymous OCI manifest retrieval and its SHA256 verified |
+| built by | GitHub-hosted ARM64 [release-image run 37138684406](https://github.com/0xSero/local-ai-images/actions/runs/37138684406), source `93e001cf4ecafeb71c6e737eeefad9a9b4ce9235` on `main` |
+| attestation | Signed SLSA provenance verified against `release-image.yml@refs/heads/main`, with self-hosted runners denied |
+| runtime qualification | Fresh six-gate acceptance on this exact image and final public weight layout is still required in [registry PR #154](https://github.com/0xSero/local-ai-registry/pull/154) |
+
+The earlier host-built image was `sha256:5668e35e5ee021da4b9ce88a1964caf0e082e8ca01d81d1d64b6213a55c6add5`
+(`s016` / historical `latest`), produced by `spark/host-build.sh` and `spark/overlay.Dockerfile` without a CI
+attestation. Its measurements below remain historical evidence; they have not been relabeled for the new digest.
 
 ## Stack
 
@@ -32,14 +37,15 @@ brandonmmusic fork of exllamav3. This image does **not** contain that fork or an
 turboderp exllamav3 1.5.3 from source, and `st_moe_ext` compiles only against that release's MIT headers
 (`quant/exl3_dq.cuh`, `quant/hadamard_inner.cuh`, `ptx.cuh`).
 
-What the build changes:
+What the current source builds (the published image is pinned separately above):
 
 - vLLM r38 is rebuilt with `TORCH_CUDA_ARCH_LIST=12.1a`. The build makes one CMake source
   edit: r38's CUDA>=13.0 supported-arch list omits `12.1`, which narrows `12.1a` kernels to `sm_120a` cubins that do
   not load on GB10. `build_wheels.sh` adds `12.1`, and the edit is idempotent.
 - r38 unconditionally requests the Hopper-only FA3 extension even when `FA3_ARCHS` is empty. Its runtime only
   supports FA3 on compute capability 9.x, so `build_wheels.sh` omits that extension from this GB10 build. FA2 and
-  all GB10-compatible vLLM/EXL3 targets remain. The source edit checks its exact anchor and is idempotent.
+  all GB10-compatible vLLM/EXL3 targets remain. The source edit checks its exact anchor and is idempotent. This
+  optimization landed after the published `93e001c` build, which still contains the unused FA3 extension.
 - The base image's vLLM 0.30.0 is uninstalled completely, so its `.so` files never mix with r38's Python.
 - CuTe-DSL 4.6.2 and quack 0.6.4 are installed `--no-deps` to keep the base NCCL 2.30.7.
 - `patch_vllm.py` wires the EXL3 routed-expert method into `deepseek_v4` / `deepseek_v4_1` (quant config plus the
@@ -50,7 +56,14 @@ What the build changes:
 
 ## Weights and mounts
 
-The image ships no weights. `spark/run_2spark.sh` mounts the following, read-only except the cache:
+The image ships no weights. The final public checkpoint is
+`0xSero/DeepSeek-V4.1-Flash-Spark@08ac8b3defc9a239ba0baf51059687c689406519` (296 files, about 462 GB).
+The pending registry launch mounts its repository root at `/model`, uses `--workdir /model/exl3`, and sets
+`ST_EXL3_PLAN=/model/exl3/plan/J268-ho-v31-K5n.json`. Run the pinned repository's `reassemble.sh` on each node
+first to reconstruct and hash-check the two Engram shards. Allow about 665 GB during download/reassembly,
+plus image and cache space. This final layout still needs acceptance with the CI image.
+
+The historical S016 launcher `spark/run_2spark.sh` uses separate local directories instead, read-only except the cache:
 
 | container path | content |
 |---|---|
@@ -81,7 +94,7 @@ The containers need `--network host --ipc host --privileged` and RDMA devices, b
 the ConnectX fabric. A host `spark/memguard.sh` stops the model containers before a unified-memory OOM can wedge
 the host. The launcher never caps output length and never touches GPU power or clocks.
 
-Measured on 2x DGX Spark with this image (sovereign-trellis `campaigns/dsv41-2spark/serve2spark/LEDGER.md` @
+Measured on 2x DGX Spark with the earlier host image `5668e35e` (sovereign-trellis `campaigns/dsv41-2spark/serve2spark/LEDGER.md` @
 `a9ea365`, captured 2026-10-03):
 
 - **S016**: prefill 8k **2,050.1** tok/s, 32k **2,060.6** tok/s; code decode C1 39.26 tok/s.
@@ -92,20 +105,18 @@ The registry recipe's acceptance run is the authoritative evidence.
 
 ## Build
 
-**CI (target path).** Run `release-image.yml` with `image=deepseek-v4.1-flash-spark`, `tag=s016` and
-`platform=linux/arm64`. The `platform` input is added in this PR. Before this PR the workflow was amd64-only
-(`runs-on: ubuntu-latest`, `platforms: linux/amd64`). With `platform=linux/arm64` it now builds natively on
-`ubuntu-24.04-arm` with a 6 h timeout, and amd64 images are unchanged. `./Dockerfile` is self-contained:
+**CI publication.** Run `release-image.yml` with `image=deepseek-v4.1-flash-spark`, a new tag and
+`platform=linux/arm64`. It builds natively on `ubuntu-24.04-arm` with a 6 h timeout. `./Dockerfile` is self-contained:
 
 - A `wheels` stage fetches the three pinned sources as GitHub archives with `--checksum=sha256:`.
 - That stage runs `build_wheels.sh` CPU-only with `MAX_JOBS=4` (build-arg); the workflow adds 24 GB swap for compiler memory peaks.
 - The final stage installs the results.
 
-This path has not run yet. The risks are the 6 h job limit for a full vLLM build at `MAX_JOBS=4`, and runner disk
-space for a base image of about 20 GB. If either fails, the fallback is a self-hosted arm64 runner on a DGX Spark.
-GPU validation (`validate.py`) cannot run on a GPU-less runner.
+The published main build completed vLLM in 6,607 s, exllamav3 in 672 s and the prefill extension in 67 s, passed
+the patch/import checks, and published the image and provenance. These CPU build checks do not replace GPU
+model acceptance. The registry requires the GitHub-hosted main-workflow attestation for publication.
 
-**On a DGX Spark (how the published digest was made).** Run `spark/host-build.sh`, which:
+**Historical host build.** `spark/host-build.sh` was used for the earlier unattested image. It:
 
 1. fetches the pinned sources;
 2. builds the wheels in the base container (`MAX_JOBS=10`, memory-capped);
@@ -114,8 +125,8 @@ GPU validation (`validate.py`) cannot run on a GPU-less runner.
 
 Its build context is `spark/Dockerfile`, `build_wheels.sh`, `validate.py` and `patch/`. `spark/overlay.Dockerfile`
 then re-applies the patch and adds the prebuilt `st_moe_ext` `.so` (built from the `st_moe_ext.cu` in `patch/`),
-producing `v41fix3`. That image is the one published here. The `.cu` copy inside the published image at
-`/opt/st/patch/st_moe_ext/` is an older revision, and only the `.so` is used. A CI build ships the current source.
+producing `v41fix3`. In that historical image, the `.cu` copy at
+`/opt/st/patch/st_moe_ext/` is an older revision, and only the `.so` is used. The CI image ships its pinned source.
 
 Validate on a Spark (no weights needed):
 
