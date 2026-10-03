@@ -52,6 +52,14 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
           sudo docker system prune -af
           df -h /
+      - name: Add compiler swap for Spark
+        if: inputs.image == 'deepseek-v4.1-flash-spark' && inputs.platform == 'linux/arm64'
+        run: |
+          sudo fallocate -l 8G /swapfile-local-ai
+          sudo chmod 600 /swapfile-local-ai
+          sudo mkswap /swapfile-local-ai
+          sudo swapon /swapfile-local-ai
+          free -h
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Verify pins
         run: |

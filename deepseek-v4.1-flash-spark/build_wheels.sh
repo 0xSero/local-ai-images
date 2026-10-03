@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs INSIDE vllm/vllm-openai:v0.30.0 (arm64, torch 2.13.0+cu130, nvcc 13.0, py3.12), CPU only, from build.sh.
 # Builds two wheels for GB10 (sm_121) into /out:
-#   1. local-inference-lab/vllm r38 (66c29357), all compiled ops for TORCH_CUDA_ARCH_LIST=12.1a
+#   1. local-inference-lab/vllm r38 (66c29357), GB10 ops for TORCH_CUDA_ARCH_LIST=12.1a; FA2 PTX, no Hopper-only FA3
 #      (no 0.30.0 .so files are reused; the build dir /src/vllm/build persists, so a rerun is incremental)
 #   2. turboderp exllamav3 1.5.3 (d3739fd, MIT), exllamav3_ext for sm_121
 #   3. st_moe_ext (sovereign-trellis EXL3 prefill grouped GEMM, deploy/serve/patch/st_moe_ext), built against the
@@ -40,6 +40,20 @@ if [ "${SKIP_VLLM:-0}" != 1 ]; then
     sed -i 's/"7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0")/"7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0;12.1")/' CMakeLists.txt
     echo "patched CMakeLists.txt: CUDA>=13.0 supported archs += 12.1"
   fi
+  # r38 builds FA3 even with FA3_ARCHS empty. Its runtime supports FA3 only on
+  # capability 9.x, so GB10 cannot use these Hopper targets (hours of extra nvcc).
+  python3 - <<'PYBUILD'
+from pathlib import Path
+p = Path("setup.py")
+s = p.read_text()
+old = '        ext_modules.append(CMakeExtension(name="vllm.vllm_flash_attn._vllm_fa3_C"))'
+new = '        pass  # GB10: FA3 supports only compute capability 9.x'
+if old in s:
+    assert s.count(old) == 1
+    p.write_text(s.replace(old, new))
+else:
+    assert s.count(new) == 1
+PYBUILD
   # shallow clone: no tags for setuptools-scm; pin the version string (pop-os r38 reports 0.26.1rc0+glm53.r38)
   SETUPTOOLS_SCM_PRETEND_VERSION="$VLLM_VERSION" VLLM_TARGET_DEVICE=cuda TORCH_CUDA_ARCH_LIST=12.1a \
   VLLM_DISABLE_SCCACHE=1 CMAKE_BUILD_TYPE=Release \

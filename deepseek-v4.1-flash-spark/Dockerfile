@@ -2,14 +2,14 @@
 # experts) served by vLLM with tensor parallel 2 across TWO NVIDIA DGX Spark (GB10, sm_121, arm64) over the RoCE
 # fabric. OpenAI-compatible API on :8000 (deepseek_v41 reasoning + tool calls, image input).
 #
-# linux/arm64 ONLY. Every compiled op is built for TORCH_CUDA_ARCH_LIST=12.1a (GB10); the cubins do not load on
-# other GPUs.
+# linux/arm64 ONLY. Architecture-specific ops target GB10 (12.1a); FA2 retains upstream 8.0+PTX.
+# Hopper-only FA3 is excluded. This image is intended for DGX Spark.
 #
 # Stack (all pinned; sources fetched as GitHub archives with sha256 checksums):
 #   base         vllm/vllm-openai:v0.30.0 (multi-arch index, arm64 used): torch 2.13.0+cu130, py3.12, nvcc 13.0,
 #                flashinfer 0.6.18.post1, NCCL 2.30.7. Its vLLM 0.30.0 package is removed completely.
-#   vLLM         local-inference-lab/vllm r38 @ 66c29357 (Apache-2.0), all compiled ops rebuilt for 12.1a
-#                (one CMake source edit in build_wheels.sh: CUDA>=13 supported archs += 12.1)
+#   vLLM         local-inference-lab/vllm r38 @ 66c29357 (Apache-2.0), compiled ops rebuilt for GB10
+#                (build_wheels.sh adds CUDA>=13 arch 12.1 and excludes Hopper-only FA3)
 #   b12x         local-inference-lab/b12x @ ce419b52 (Apache-2.0), CuTe-DSL JIT for sm_121a
 #   exllamav3    turboderp-org/exllamav3 v1.5.3 @ d3739fd3 (MIT), exllamav3_ext built for sm_121
 #                (upstream turboderp, NOT the brandonmmusic fork that other Spark images bundle)
@@ -24,7 +24,7 @@
 # spark/overlay.Dockerfile and pushed from the host (unattested); see README.md.
 FROM vllm/vllm-openai@sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90 AS wheels
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
-ARG MAX_JOBS=1
+ARG MAX_JOBS=2
 ADD --checksum=sha256:a3c458d57d695f3d12a403a64ea693db296f9a8afa96905ec2e91bfed6d0a7ec https://github.com/local-inference-lab/vllm/archive/66c293578412417476f842c1da5805d3a3d959a8.tar.gz /tmp/vllm.tgz
 ADD --checksum=sha256:df9bde275b90adc4c5830e895e9f1889c295d71826c3c9c17f009865225ca460 https://github.com/local-inference-lab/b12x/archive/ce419b52681b7922bb0972d4b58b590a3fd005b2.tar.gz /tmp/b12x.tgz
 ADD --checksum=sha256:cb8066e9077ba539e4340e3576be8806bdbcae4f99f1a8f99a2c4ebdef9ab447 https://github.com/turboderp-org/exllamav3/archive/d3739fd393337b1ff4d6c2a342b12f0c87a9592f.tar.gz /tmp/exllamav3.tgz
@@ -32,7 +32,7 @@ RUN for p in vllm b12x exllamav3; do mkdir -p /src/$p && tar -xzf /tmp/$p.tgz -C
  && rm -f /tmp/*.tgz && mkdir -p /out /logs
 COPY build_wheels.sh /build_wheels.sh
 COPY patch/ /patch/
-# CPU-only compile; serialize nvcc on hosted runners to bound peak compiler memory.
+# CPU-only compile; two nvcc jobs, with swap enabled by the hosted release workflow.
 RUN MAX_JOBS=${MAX_JOBS} bash /build_wheels.sh
 
 FROM vllm/vllm-openai@sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90
