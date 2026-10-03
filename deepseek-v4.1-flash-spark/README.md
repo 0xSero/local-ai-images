@@ -5,7 +5,7 @@ trellis routed experts, served by vLLM with tensor parallel 2 across **two NVIDI
 arm64, 128 GB unified memory each) linked by their RoCE fabric. It exposes an OpenAI-compatible API on :8000 with
 deepseek_v41 reasoning and tool-call parsing, image input (1 image per prompt), and a 262,144-token context.
 
-The image is **linux/arm64 only**. Every compiled op targets `12.1a`, so the image does not run on other GPUs.
+The image is **linux/arm64 only**. Its architecture-specific vLLM and EXL3 kernels target GB10; FlashAttention 2 retains its upstream `8.0+PTX` fallback. Hopper-only FlashAttention 3 is excluded. The image is intended for DGX Spark.
 
 ## Published image
 
@@ -34,9 +34,12 @@ turboderp exllamav3 1.5.3 from source, and `st_moe_ext` compiles only against th
 
 What the build changes:
 
-- vLLM r38 is rebuilt with every compiled op for `TORCH_CUDA_ARCH_LIST=12.1a`. The build makes one CMake source
+- vLLM r38 is rebuilt with `TORCH_CUDA_ARCH_LIST=12.1a`. The build makes one CMake source
   edit: r38's CUDA>=13.0 supported-arch list omits `12.1`, which narrows `12.1a` kernels to `sm_120a` cubins that do
   not load on GB10. `build_wheels.sh` adds `12.1`, and the edit is idempotent.
+- r38 unconditionally requests the Hopper-only FA3 extension even when `FA3_ARCHS` is empty. Its runtime only
+  supports FA3 on compute capability 9.x, so `build_wheels.sh` omits that extension from this GB10 build. FA2 and
+  all GB10-compatible vLLM/EXL3 targets remain. The source edit checks its exact anchor and is idempotent.
 - The base image's vLLM 0.30.0 is uninstalled completely, so its `.so` files never mix with r38's Python.
 - CuTe-DSL 4.6.2 and quack 0.6.4 are installed `--no-deps` to keep the base NCCL 2.30.7.
 - `patch_vllm.py` wires the EXL3 routed-expert method into `deepseek_v4` / `deepseek_v4_1` (quant config plus the
@@ -95,7 +98,7 @@ The registry recipe's acceptance run is the authoritative evidence.
 `ubuntu-24.04-arm` with a 6 h timeout, and amd64 images are unchanged. `./Dockerfile` is self-contained:
 
 - A `wheels` stage fetches the three pinned sources as GitHub archives with `--checksum=sha256:`.
-- That stage runs `build_wheels.sh` CPU-only with `MAX_JOBS=4` (build-arg) to fit the runner's 16 GB.
+- That stage runs `build_wheels.sh` CPU-only with `MAX_JOBS=4` (build-arg); the workflow adds 24 GB swap for compiler memory peaks.
 - The final stage installs the results.
 
 This path has not run yet. The risks are the 6 h job limit for a full vLLM build at `MAX_JOBS=4`, and runner disk

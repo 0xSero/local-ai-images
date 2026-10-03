@@ -2,14 +2,14 @@
 # experts) served by vLLM with tensor parallel 2 across TWO NVIDIA DGX Spark (GB10, sm_121, arm64) over the RoCE
 # fabric. OpenAI-compatible API on :8000 (deepseek_v41 reasoning + tool calls, image input).
 #
-# linux/arm64 ONLY. Every compiled op is built for TORCH_CUDA_ARCH_LIST=12.1a (GB10); the cubins do not load on
-# other GPUs.
+# linux/arm64 ONLY. Architecture-specific ops target GB10 (12.1a); FA2 retains upstream 8.0+PTX.
+# Hopper-only FA3 is excluded. This image is intended for DGX Spark.
 #
 # Stack (all pinned; sources fetched as GitHub archives with sha256 checksums):
 #   base         vllm/vllm-openai:v0.30.0 (multi-arch index, arm64 used): torch 2.13.0+cu130, py3.12, nvcc 13.0,
 #                flashinfer 0.6.18.post1, NCCL 2.30.7. Its vLLM 0.30.0 package is removed completely.
-#   vLLM         local-inference-lab/vllm r38 @ 66c29357 (Apache-2.0), all compiled ops rebuilt for 12.1a
-#                (one CMake source edit in build_wheels.sh: CUDA>=13 supported archs += 12.1)
+#   vLLM         local-inference-lab/vllm r38 @ 66c29357 (Apache-2.0), compiled ops rebuilt for GB10
+#                (build_wheels.sh adds CUDA>=13 arch 12.1 and excludes Hopper-only FA3)
 #   b12x         local-inference-lab/b12x @ ce419b52 (Apache-2.0), CuTe-DSL JIT for sm_121a
 #   exllamav3    turboderp-org/exllamav3 v1.5.3 @ d3739fd3 (MIT), exllamav3_ext built for sm_121
 #                (upstream turboderp, NOT the brandonmmusic fork that other Spark images bundle)
@@ -32,7 +32,7 @@ RUN for p in vllm b12x exllamav3; do mkdir -p /src/$p && tar -xzf /tmp/$p.tgz -C
  && rm -f /tmp/*.tgz && mkdir -p /out /logs
 COPY build_wheels.sh /build_wheels.sh
 COPY patch/ /patch/
-# CPU-only compile; MAX_JOBS bounds nvcc memory (4 fits a 16 GB runner, the Spark host build uses 10)
+# CPU-only compile; four nvcc jobs with 24 GB swap in the hosted release workflow.
 RUN MAX_JOBS=${MAX_JOBS} bash /build_wheels.sh
 
 FROM vllm/vllm-openai@sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90
