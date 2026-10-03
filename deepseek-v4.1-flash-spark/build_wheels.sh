@@ -43,9 +43,7 @@ if [ "${SKIP_VLLM:-0}" != 1 ]; then
   # shallow clone: no tags for setuptools-scm; pin the version string (pop-os r38 reports 0.26.1rc0+glm53.r38)
   SETUPTOOLS_SCM_PRETEND_VERSION="$VLLM_VERSION" VLLM_TARGET_DEVICE=cuda TORCH_CUDA_ARCH_LIST=12.1a \
   VLLM_DISABLE_SCCACHE=1 CMAKE_BUILD_TYPE=Release \
-    python3 -m pip wheel -v --no-build-isolation --no-deps -w /out . > /logs/vllm-wheel.log 2>&1 || {
-      tail -250 /logs/vllm-wheel.log; exit 1;
-    }
+    python3 -m pip wheel -v --no-build-isolation --no-deps -w /out . 2>&1 | tee /logs/vllm-wheel.log
   ls /out/vllm-*.whl
   echo "vllm wheel built in $(( $(date +%s) - t0 ))s"
 fi
