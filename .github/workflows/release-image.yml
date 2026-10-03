@@ -14,6 +14,14 @@ on:
         description: attach an SBOM; disable for images whose package tree exceeds the 40 MB attestation limit
         required: false
         default: "true"
+      platform:
+        description: "linux/amd64 (default, ubuntu-latest) or linux/arm64 (ubuntu-24.04-arm runner, e.g. DGX Spark images)"
+        required: false
+        default: linux/amd64
+        type: choice
+        options:
+          - linux/amd64
+          - linux/arm64
       smoke:
         description: "smoke mode: skip build; anonymous full amd64 pull of `digest` + CPU import/parser checks"
         required: false
@@ -34,7 +42,10 @@ permissions:
 jobs:
   build:
     if: inputs.smoke != 'true'
-    runs-on: ubuntu-latest
+    # amd64 stays on ubuntu-latest (unchanged for every existing image); linux/arm64 builds natively on GitHub's
+    # arm64 runner, no QEMU. arm64 CUDA builds compile for hours, so allow the full 6 h job limit.
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 360
     steps:
       - name: Free runner disk
         run: |
@@ -107,15 +118,15 @@ jobs:
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: ./${{ inputs.image }}
-          platforms: linux/amd64
+          platforms: ${{ inputs.platform }}
           push: true
           tags: ghcr.io/0xsero/${{ inputs.image }}:${{ inputs.tag }}
           provenance: mode=max
           sbom: ${{ inputs.sbom == 'true' }}
           # Shared-layer reuse across builds of the same base (apt layers,
           # base pulls) so repeated matrix builds do not rebuild every layer.
-          cache-from: type=gha,scope=${{ inputs.image }}
-          cache-to: type=gha,mode=max,scope=${{ inputs.image }}
+          cache-from: type=gha,scope=${{ inputs.image }}${{ inputs.platform == 'linux/arm64' && '-arm64' || '' }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.image }}${{ inputs.platform == 'linux/arm64' && '-arm64' || '' }}
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
@@ -131,6 +142,7 @@ jobs:
             echo "## ${{ inputs.image }}:${{ inputs.tag }}"
             echo ""
             echo "- image: \`$out\`"
+            echo "- platform: ${{ inputs.platform }}"
             echo "- base pins:"
             grep -iE '^[[:space:]]*FROM[[:space:]]' "./${{ inputs.image }}/Dockerfile" \
               | sed -E 's/^/  - `/; s/[[:space:]]*$/`/'
