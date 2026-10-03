@@ -98,7 +98,7 @@ The registry recipe's acceptance run is the authoritative evidence.
 `ubuntu-24.04-arm` with a 6 h timeout, and amd64 images are unchanged. `./Dockerfile` is self-contained:
 
 - A `wheels` stage fetches the three pinned sources as GitHub archives with `--checksum=sha256:`.
-- That stage runs `build_wheels.sh` CPU-only with `MAX_JOBS=2` (build-arg); the workflow adds 8 GB swap for compiler memory peaks.
+- That stage runs `build_wheels.sh` CPU-only with `MAX_JOBS=4` (build-arg); the workflow adds 24 GB swap for compiler memory peaks.
 - The final stage installs the results.
 
 This path has not run yet. The risks are the 6 h job limit for a full vLLM build at `MAX_JOBS=4`, and runner disk

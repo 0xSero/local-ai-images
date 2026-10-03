@@ -31,7 +31,7 @@ on:
         required: false
         default: ""
       engine:
-        description: "smoke mode: sglang | vllm | tabby | llama (selects CPU checks)"
+        description: "smoke mode: sglang | vllm | tabby | llama | dsv41 (selects CPU checks)"
         required: false
         default: ""
 permissions:
@@ -52,14 +52,14 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
           sudo docker system prune -af
           df -h /
-      - name: Add compiler swap for Spark
-        if: inputs.image == 'deepseek-v4.1-flash-spark' && inputs.platform == 'linux/arm64'
+      - name: Add swap (arm64 CUDA compiles)
+        # ubuntu-24.04-arm has 16 GB RAM and 3 GB swap; vLLM's heavy CUTLASS/Marlin TUs peak above that at
+        # MAX_JOBS=4 (measured ~15.5 GB RAM + 13.5 GB swap), and the OOM killer would take out cicc.
+        if: inputs.platform == 'linux/arm64'
         run: |
-          sudo fallocate -l 8G /swapfile-local-ai
-          sudo chmod 600 /swapfile-local-ai
-          sudo mkswap /swapfile-local-ai
-          sudo swapon /swapfile-local-ai
-          free -h
+          sudo fallocate -l 24G /swapfile-build && sudo chmod 600 /swapfile-build
+          sudo mkswap /swapfile-build && sudo swapon /swapfile-build
+          free -m
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Verify pins
         run: |
@@ -160,6 +160,8 @@ jobs:
     if: inputs.smoke == 'true'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: inputs.engine == 'dsv41'
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
@@ -181,7 +183,7 @@ jobs:
             echo "- anonymous full linux/amd64 pull: OK (all layers fetched + integrity-checked by docker)"
             echo "- digest verified: \`${{ inputs.digest }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: CPU import + parser/flag checks (fail-closed)
+      - name: CPU checks (fail-closed)
         env:
           IMAGE: ${{ inputs.image }}
           DIGEST: ${{ inputs.digest }}
@@ -192,6 +194,13 @@ jobs:
           e="${ENGINE}"
           pass(){ echo "- $1: PASS" >> "$GITHUB_STEP_SUMMARY"; }
           case "$e" in
+            dsv41)
+              commit=$(sed -n 's/^ARG DSV41_COMMIT=//p' dsv41-flash-offload/Dockerfile)
+              docker run --rm --network none --memory 1g --cpus 2 --entrypoint python3 \
+                -v "$PWD/dsv41-flash-offload/check_source.py:/check_source.py:ro" "$ref" /check_source.py "$commit"
+              pass "DSV41 installed source hashes, patch receipt chain, CPU tier hook and Engram shared-library load"
+              echo "- CPU source checks only; GPU launch, model acceptance and quality remain separate gates." >> "$GITHUB_STEP_SUMMARY"
+              ;;
             sglang)
               docker run --rm --entrypoint /opt/sglang/bin/python3 "$ref" -c "import sglang, huggingface_hub; print('sglang', getattr(sglang,'__version__','?'), 'hf_hub', huggingface_hub.__version__)"
               pass "sglang + huggingface_hub import"

@@ -24,7 +24,7 @@
 # spark/overlay.Dockerfile and pushed from the host (unattested); see README.md.
 FROM vllm/vllm-openai@sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90 AS wheels
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
-ARG MAX_JOBS=2
+ARG MAX_JOBS=4
 ADD --checksum=sha256:a3c458d57d695f3d12a403a64ea693db296f9a8afa96905ec2e91bfed6d0a7ec https://github.com/local-inference-lab/vllm/archive/66c293578412417476f842c1da5805d3a3d959a8.tar.gz /tmp/vllm.tgz
 ADD --checksum=sha256:df9bde275b90adc4c5830e895e9f1889c295d71826c3c9c17f009865225ca460 https://github.com/local-inference-lab/b12x/archive/ce419b52681b7922bb0972d4b58b590a3fd005b2.tar.gz /tmp/b12x.tgz
 ADD --checksum=sha256:cb8066e9077ba539e4340e3576be8806bdbcae4f99f1a8f99a2c4ebdef9ab447 https://github.com/turboderp-org/exllamav3/archive/d3739fd393337b1ff4d6c2a342b12f0c87a9592f.tar.gz /tmp/exllamav3.tgz
@@ -32,7 +32,7 @@ RUN for p in vllm b12x exllamav3; do mkdir -p /src/$p && tar -xzf /tmp/$p.tgz -C
  && rm -f /tmp/*.tgz && mkdir -p /out /logs
 COPY build_wheels.sh /build_wheels.sh
 COPY patch/ /patch/
-# CPU-only compile; two nvcc jobs, with swap enabled by the hosted release workflow.
+# CPU-only compile; four nvcc jobs with 24 GB swap in the hosted release workflow.
 RUN MAX_JOBS=${MAX_JOBS} bash /build_wheels.sh
 
 FROM vllm/vllm-openai@sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90
