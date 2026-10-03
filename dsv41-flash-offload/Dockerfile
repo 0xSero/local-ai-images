@@ -8,6 +8,10 @@
 #   prefill fidelity (D061 path) vs the D026 reference: top-1 0.9856, mean KL 0.0068 nats (inherited guard: fail).
 #   D119 (this default: --max-model-len 262144, KV 1.5 GiB) C1 prefill/decode 32k 774.6/19.42, 65k 813.2/20.51, 261k 764.1/20.59;
 #   container RAM peak 212.1 GiB (256 GiB host), NVMe 488 GB free, VRAM 21,852 MiB.
+#   D135 (this commit's defaults, 2026-10-03): prefix caching (exact: identical greedy tokens cold vs cached), <=512-token
+#   steps on the CPU-tier split path, safe elastic expert cache, 8 staging slots + cross-layer DMA prefetch, decode share;
+#   chunk 8192. Decode C1/C2/C4 ~19/22/24 agg tok/s; prefill 8k/64k/261k 787/769/694 tok/s; cached 131k-token turn TTFT
+#   0.76 s; 30-min 4-worker soak 58 requests, 0 errors, 0 OOM; VRAM peak 23.1 GB. results/D130.md in the serving repo.
 #
 # Base + upstream pins = the campaign runtime image dsv41-exl3:ampere-d005 (run D005) as one Dockerfile:
 #   lazymio/vllm-backport v0.13.0 amd64 (vLLM 0.13.0 with DeepSeek-V4.1, torch 2.13.0+cu130, CUDA 13.0)
@@ -56,7 +60,7 @@ RUN git clone -q https://github.com/turboderp-org/exllamav3.git /opt/exllamav3 \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG DSV41_REPO=https://github.com/0xSero/dsv41-flash-offload
-ARG DSV41_COMMIT=2e9da5ecdab37c232c2da887e25c33a99da738d3
+ARG DSV41_COMMIT=690d2adde310411c61aefcf7701f943ced07b091
 LABEL ai.omarchy.dsv41-flash-offload.commit="2e9da5ecdab37c232c2da887e25c33a99da738d3"
 RUN git init -q /opt/dsv41 && cd /opt/dsv41 \
  && git fetch -q --depth 1 "${DSV41_REPO}" "${DSV41_COMMIT}" \
