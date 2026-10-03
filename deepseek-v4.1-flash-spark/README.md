@@ -11,7 +11,7 @@ The image is **linux/arm64 only**. Every compiled op targets `12.1a`, so the ima
 
 | | |
 |---|---|
-| image | `ghcr.io/0xsero/deepseek-v4.1-flash-spark@sha256:DIGEST_PENDING` (tags `s016`, `latest`) |
+| image | `ghcr.io/0xsero/deepseek-v4.1-flash-spark@sha256:5668e35e5ee021da4b9ce88a1964caf0e082e8ca01d81d1d64b6213a55c6add5` (tags `s016`, `latest`) |
 | visibility | **private** package |
 | built by | `spark/host-build.sh` + `spark/overlay.Dockerfile` on a DGX Spark (local tag `sovereign-trellis/ds41-exl3-spark:v41fix3`, image id `afe81121ca2a`), pushed from host spark-557f with `docker push` |
 | attestation | **none**. This digest was not built by `release-image.yml`, so it has no BuildKit provenance, SBOM or `gh attestation`. A CI build of `./Dockerfile` (below) replaces it, and the registry recipe stays `candidate` until then. |
