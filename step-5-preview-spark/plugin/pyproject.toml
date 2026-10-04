@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "step5-spark"
+version = "0.1.0"
+description = "vLLM plugin: Step-5 (StepFun) with EXL3 experts/body on 2x DGX Spark"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0 (model files derived from vLLM) / MIT (EXL3 integration)" }
+
+[project.entry-points."vllm.general_plugins"]
+step5_spark = "step5_spark:register"
+
+[tool.setuptools]
+packages = ["step5_spark"]
