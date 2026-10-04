@@ -85,6 +85,17 @@ import os as _os
 _CAPTURE_DIR = _os.environ.get("STEP5_CAPTURE_DIR")
 _CAPTURE_MIN_ROWS = int(_os.environ.get("STEP5_CAPTURE_MIN_ROWS", "512"))
 _CAPTURE_STRIDE = int(_os.environ.get("STEP5_CAPTURE_STRIDE", "1"))
+
+# Numerics bisection: with STEP5_DUMP_DIR set (TP1, eager), the first forward with exactly STEP5_DUMP_ROWS tokens saves
+# per-op fp32 copies of every decoder layer's intermediates to <dir>/L<NN>.pt (diagnostic only).
+_DUMP_DIR = _os.environ.get("STEP5_DUMP_DIR")
+_DUMP_ROWS = int(_os.environ.get("STEP5_DUMP_ROWS", "2048"))  # exact row count (skips warm-up/profile passes)
+_DUMP_STATE = {"active": False, "done": False}
+
+
+def _dump(store, name, t):
+    if store is not None:
+        store[name] = t.detach().float().cpu()
 _CAPTURE_N = [0]
 
 
@@ -323,15 +334,20 @@ class Step5Attention(nn.Module):
         k_by_head = k.view(*k.shape[:-1], k.shape[-1] // self.head_dim, self.head_dim)
         k_by_head = self.k_norm(k_by_head)
         k = k_by_head.view(k.shape)
+        st = getattr(self, "_dump_store", None)
+        _dump(st, "q_normed", q); _dump(st, "k_normed", k); _dump(st, "v", v)
         if self.use_rope:
             q, k = self.rotary_emb(positions, q, k)
+        _dump(st, "q_rope", q); _dump(st, "k_rope", k)
         if self.use_ssmax:
             n = (positions.to(torch.float32) + 1.0).log()
             q = (
                 q.view(-1, self.num_heads, self.head_dim).float()
                 * (n[:, None, None] * self.ssmax_s[None, :, None])
             ).to(v.dtype).view(q.shape)
+        _dump(st, "q_final", q)
         attn_output = self.attn(q, k, v)
+        _dump(st, "attn_core", attn_output)
         if self.use_head_wise_attn_gate:
             extra_dims, _ = self.g_proj(hidden_states)
             output = (
@@ -339,6 +355,7 @@ class Step5Attention(nn.Module):
                 * extra_dims.unsqueeze(-1).sigmoid()
             )
             attn_output = output.view(*attn_output.shape)
+        _dump(st, "attn_gated", attn_output)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -555,6 +572,7 @@ class Step5DecoderLayer(nn.Module):
             config.hidden_size, config.rms_norm_eps
         )
         self.prefix = prefix
+        self._last_layer = config.num_hidden_layers - 1
 
     def add_and_maybe_inplace_all_reduce(
         self, in1: torch.Tensor, in2: torch.Tensor
@@ -567,22 +585,48 @@ class Step5DecoderLayer(nn.Module):
         self, positions: torch.Tensor, hidden_states: torch.Tensor
     ) -> torch.Tensor:
         # fp32 residual stream; sublayers run in the model dtype
+        st = None
+        if _DUMP_DIR and not _DUMP_STATE["done"] and hidden_states.shape[0] == _DUMP_ROWS:
+            st = {}
+            _DUMP_STATE["active"] = True
+        self.self_attn._dump_store = st
         residual = hidden_states.float()
+        _dump(st, "x_in", residual)
         dtype = self.post_attention_layernorm.weight.dtype
         hidden_states = self.input_layernorm(residual).to(dtype)
+        _dump(st, "ln1", hidden_states)
 
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
         )
+        _dump(st, "attn_out", hidden_states)
         residual = residual + hidden_states.float()
+        _dump(st, "x_mid", residual)
         hidden_states = self.post_attention_layernorm(residual).to(dtype)
+        _dump(st, "ln2", hidden_states)
 
         if self.use_moe:
+            if st is not None:
+                g = self.moe.gate
+                logits = hidden_states.float() @ g.weight.float().t()
+                score = logits.sigmoid()
+                st["router_logits"] = logits.cpu()
+                st["topk_ids"] = (score + self.moe.router_bias.float()).topk(8, dim=-1).indices.cpu()
+                _dump(st, "shared_out", self.moe.share_expert(hidden_states))
             ffn_output = self.moe(hidden_states)
         else:
             ffn_output = self.mlp(hidden_states)
-        return residual + ffn_output.float()
+        _dump(st, "ffn_out", ffn_output)
+        out = residual + ffn_output.float()
+        if st is not None:
+            st["x_out"] = out.detach().float().cpu()
+            _os.makedirs(_DUMP_DIR, exist_ok=True)
+            torch.save(st, f"{_DUMP_DIR}/L{self.layer_idx:02d}.pt")
+            self.self_attn._dump_store = None
+            if self.layer_idx == self._last_layer:
+                _DUMP_STATE["done"] = True
+        return out
 
 
 @support_torch_compile
