@@ -38,7 +38,7 @@ RUN MAX_JOBS=${MAX_JOBS} bash /build_wheels.sh
 FROM vllm/vllm-openai@sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL org.opencontainers.image.description="DeepSeek-V4.1-Flash-Spark: DeepSeek-V4.1-Flash, EXL3 routed experts, vLLM TP2 over 2x DGX Spark (sm_121, arm64)"
 LABEL ai.omarchy.engine="vllm"
 LABEL ai.omarchy.engine.version="0.26.1rc0+glm53.r38.sm121"

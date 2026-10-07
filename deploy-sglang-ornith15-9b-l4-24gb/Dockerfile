@@ -3,7 +3,7 @@
 # ENTRYPOINT fetches ornith-ai/Ornith-1.5-9B@489cb97981b8 into /opt/models/Ornith-1.5-9B, writes .omp-ready, then delegates
 # to the base /opt/entrypoint.sh shim ("$@" = passed --docker-args OR the serve CMD below). Build-status only.
 FROM ghcr.io/0xsero/sglang@sha256:787461f889674cdd9339be2409a6e8b46ec2f5aac71669481c319f87c2beca13
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R17"
 LABEL ai.omarchy.model.repo="ornith-ai/Ornith-1.5-9B"
 LABEL ai.omarchy.model.revision="489cb97981b8654bcfcf30ce1f94ed1b62e07b53"

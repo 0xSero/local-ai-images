@@ -26,7 +26,7 @@
 # Build: pushed by .github/workflows/release-image.yml with BuildKit provenance, an SBOM, and a build attestation.
 FROM lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f
 
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.engine="exllamav3"
 LABEL ai.omarchy.engine.version="1.5.1"
 LABEL ai.omarchy.quant="exl3"
@@ -54,7 +54,7 @@ RUN git clone https://github.com/turboderp-org/exllamav3 /opt/exllamav3-src \
  && rm -rf /opt/exllamav3-src
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
-ARG GLM53_REPO=https://github.com/0xSero/glm53-flash-offload
+ARG GLM53_REPO=https://github.com/sybil-solutions/glm53-flash-offload
 ARG GLM53_COMMIT=92698604575f789ecc7a2340480413567e6d05c6
 LABEL ai.omarchy.glm53-flash-offload.commit="${GLM53_COMMIT}"
 RUN git init -q /opt/glm53 \

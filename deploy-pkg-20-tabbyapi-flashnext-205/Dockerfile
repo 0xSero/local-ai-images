@@ -1,7 +1,7 @@
 # R26 ghcr.io/0xsero/deploy-pkg-20-tabbyapi-flashnext-205:v1
 # MTP OFF control vs R20; distinguishes inert/mis-detected/costly MTP. Owned TabbyAPI deploy image: engine (digest-pinned) + baked config.yml + blocking revision-pinned preflight.
 FROM ghcr.io/theroyallab/tabbyapi@sha256:1c13dd17416660856e9962aeee8498827f0acd604eb36795128a03ddfe03c6ef
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R26"
 LABEL ai.omarchy.package="PKG-20"
 LABEL ai.omarchy.model.repo="turboderp/Qwen3.8-Flash-Next-exl3"

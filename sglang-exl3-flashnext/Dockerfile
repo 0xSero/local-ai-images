@@ -22,7 +22,7 @@
 # attestation on the digest.
 FROM ghcr.io/0xsero/sglang-exl3@sha256:c8922bd7256caf1b273af7ac49221e652be9e6072c1cdec4b959f506fd415d79
 
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.engine="sglang"
 LABEL ai.omarchy.engine.version="0.5.20"
 LABEL ai.omarchy.quant="exl3"
@@ -31,7 +31,7 @@ LABEL ai.omarchy.cuda.archs="8.6"
 LABEL ai.omarchy.model.repo="turboderp/Qwen3.8-Flash-Next-exl3"
 LABEL ai.omarchy.model.revision="69e33439ae950f17bcbe95c98f117d80f759ab6d"
 
-ARG TRELLIS_SERVE_REPO=https://github.com/0xSero/trellis-serve
+ARG TRELLIS_SERVE_REPO=https://github.com/sybil-solutions/trellis-serve
 ARG TRELLIS_SERVE_COMMIT=b1e74afcf98203dc5326349623b556ba2df4b16a
 LABEL ai.omarchy.trellis-serve.commit="b1e74afcf98203dc5326349623b556ba2df4b16a"
 ENV TORCH_CUDA_ARCH_LIST=8.6

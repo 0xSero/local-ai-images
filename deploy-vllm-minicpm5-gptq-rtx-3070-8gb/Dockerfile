@@ -4,7 +4,7 @@
 # Served WITHOUT tool-calling per DELIVERY-24 R03/R06 contingency; vLLM MiniCPM5 tool parser unverified. capabilities.tools=engine-unsupported.
 # Build-status only; runtime untested here.
 FROM ghcr.io/0xsero/vllm-openai@sha256:1de88ff218282ce71da7811f62ea527556648e1ad05dd36e5fc82d0f9ff07424
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R03"
 LABEL ai.omarchy.model.repo="openbmb/MiniCPM5-2B-GPTQ"
 LABEL ai.omarchy.model.revision="48d57c14fba6b1f86109e1a54fafb0848c163f04"

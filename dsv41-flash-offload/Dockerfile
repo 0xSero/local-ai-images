@@ -26,7 +26,7 @@
 FROM lazymio/vllm-backport@sha256:349690323ab9aba712111529ed1ca60730199205d8202f67895ffde85b451be3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.engine="vllm"
 LABEL ai.omarchy.engine.version="0.13.0"
 LABEL ai.omarchy.quant="exl3"
@@ -59,7 +59,7 @@ RUN git clone -q https://github.com/turboderp-org/exllamav3.git /opt/exllamav3 \
  && python3 -m pip show exllamav3 >/dev/null
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
-ARG DSV41_REPO=https://github.com/0xSero/dsv41-flash-offload
+ARG DSV41_REPO=https://github.com/sybil-solutions/dsv41-flash-offload
 ARG DSV41_COMMIT=2b60498dd7d08ec04081a346148f843911996867
 LABEL ai.omarchy.dsv41-flash-offload.commit="${DSV41_COMMIT}"
 RUN git init -q /opt/dsv41 && cd /opt/dsv41 \

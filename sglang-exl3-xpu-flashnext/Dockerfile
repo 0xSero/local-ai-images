@@ -21,7 +21,7 @@
 # attestation on the digest.
 FROM lmsysorg/sglang@sha256:e4e10d66de374e6e8cc88136e8dbfc3182787070df8a48e581fb007cc7a51c36
 
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.engine="sglang"
 LABEL ai.omarchy.engine.version="0.5.20-xpu"
 LABEL ai.omarchy.quant="exl3"
@@ -29,7 +29,7 @@ LABEL ai.omarchy.hardware="intel-arc-pro-b70-32gb"
 LABEL ai.omarchy.model.repo="turboderp/Qwen3.8-Flash-Next-exl3"
 LABEL ai.omarchy.model.revision="69e33439ae950f17bcbe95c98f117d80f759ab6d"
 
-ARG TRELLIS_SERVE_REPO=https://github.com/0xSero/trellis-serve
+ARG TRELLIS_SERVE_REPO=https://github.com/sybil-solutions/trellis-serve
 ARG TRELLIS_SERVE_COMMIT=72fd2d4ca8e8de3fce03ab09e3ed1692957c2f8c
 LABEL ai.omarchy.trellis-serve.commit="72fd2d4ca8e8de3fce03ab09e3ed1692957c2f8c"
 
