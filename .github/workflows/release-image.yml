@@ -148,7 +148,8 @@ jobs:
           # Shared-layer reuse across builds of the same base (apt layers,
           # base pulls) so repeated matrix builds do not rebuild every layer.
           cache-from: type=gha,scope=${{ inputs.image }}${{ inputs.platform == 'linux/arm64' && '-arm64' || '' }}
-          cache-to: type=gha,mode=max,scope=${{ inputs.image }}${{ inputs.platform == 'linux/arm64' && '-arm64' || '' }}
+          # Cache export is an optimization; a slow/unavailable cache must not block signed publication.
+          cache-to: type=gha,mode=max,ignore-error=true,timeout=5m,scope=${{ inputs.image }}${{ inputs.platform == 'linux/arm64' && '-arm64' || '' }}
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
