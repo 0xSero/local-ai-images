@@ -31,7 +31,7 @@ on:
         required: false
         default: ""
       engine:
-        description: "smoke mode: sglang | vllm | tabby | llama | dsv41 (selects CPU checks)"
+        description: "smoke mode: sglang | vllm | tabby | llama | dsv41 | gateway | exl3xpu (CPU checks)"
         required: false
         default: ""
       namespace:
@@ -177,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        if: inputs.engine == 'dsv41'
+        if: inputs.engine == 'dsv41' || inputs.engine == 'gateway'
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
@@ -210,6 +210,19 @@ jobs:
           e="${ENGINE}"
           pass(){ echo "- $1: PASS" >> "$GITHUB_STEP_SUMMARY"; }
           case "$e" in
+            gateway)
+              want=$(sha256sum gateway/gateway.py | cut -d' ' -f1)
+              got=$(docker run --rm --network none --entrypoint sha256sum "$ref" /app/gateway.py | cut -d' ' -f1)
+              test "$want" = "$got"
+              docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m --memory 256m --cpus 2 \
+                --entrypoint python3 -v "$PWD/gateway/test.py:/app/test.py:ro" "$ref" /app/test.py
+              pass "gateway installed source hash and full protocol suite on the published image"
+              ;;
+            exl3xpu)
+              docker run --rm --network none --entrypoint python3 "$ref" -c "import exl3xpu; from importlib.metadata import entry_points; assert any(e.name=='exl3xpu' for e in entry_points(group='vllm.general_plugins'))"
+              docker run --rm --network none "$ref" --help
+              pass "EXL3 XPU plugin entry point and launcher parser; hardware inference remains separate"
+              ;;
             dsv41)
               commit=$(sed -n 's/^ARG DSV41_COMMIT=//p' dsv41-flash-offload/Dockerfile)
               docker run --rm --network none --memory 1g --cpus 2 --entrypoint python3 \
