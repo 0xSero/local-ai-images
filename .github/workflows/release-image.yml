@@ -320,7 +320,8 @@ jobs:
               pass "TabbyAPI config schema validates baked /app/config.yml"
               echo "- tabby engine-resolved values: \`$(echo "$R" | grep RESOLVED)\`" >> "$GITHUB_STEP_SUMMARY" ;;
             llama)
-              docker run --rm --entrypoint sh "$ref" -c 'command -v curl && command -v sha256sum && command -v python3 && /opt/llama/llama-server --version 2>&1 | head -1'
+              docker run --rm --entrypoint sh "$ref" -c 'command -v curl && command -v sha256sum && command -v python3'
+              docker run --rm --entrypoint /opt/llama/llama-server "$ref" --version
               pass "curl + sha256sum + python3 + llama-server present" ;;
             proof)
               # Readiness-contract proof, parameterised from the image's OWN labels -> works for every
