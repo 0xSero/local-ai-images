@@ -43,12 +43,17 @@ jobs:
           docker run --rm --entrypoint "$PY" "${{ steps.base.outputs.img }}" -c \
             "import huggingface_hub as h; print('huggingface_hub', h.__version__, 'OK')" \
             | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: llama fetch deps (curl + sha256sum + python3-after-bake)
+      - name: llama fetch and ELF dependencies (CPU only)
         if: inputs.engine == 'llama'
         run: |
-          set -e
+          set -euo pipefail
           docker run --rm --entrypoint sh "${{ steps.base.outputs.img }}" -c \
-            "command -v curl && command -v sha256sum && /opt/llama/llama-server --version 2>&1 | head -1" \
+            'set -e; command -v curl; command -v sha256sum
+             deps=$(ldd /opt/llama/llama-server); printf "%s\n" "$deps"
+             missing=$(printf "%s\n" "$deps" | awk "/=> not found/ {print \$1}")
+             test -z "$(printf "%s\n" "$missing" | sed "/^libcuda\.so\.1$/d; /^$/d")"
+             if [ -z "$missing" ]; then /opt/llama/llama-server --version
+             else echo "CPU dependencies checked; binary loading requires real NVIDIA driver libraries and remains a separate host check."; fi' \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: vllm flag + parser registry
         if: inputs.engine == 'vllm'

@@ -60,7 +60,9 @@ RUN git clone -q https://github.com/turboderp-org/exllamav3.git /opt/exllamav3 \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG DSV41_REPO=https://github.com/sybil-solutions/dsv41-flash-offload
-ARG DSV41_COMMIT=2b60498dd7d08ec04081a346148f843911996867
+# D141 serving code plus generated-pack hash verification. Prior serving/quality
+# observations above remain historical; this rebuilt digest needs fresh acceptance.
+ARG DSV41_COMMIT=d890a1c897f1c9d6d981473ec106224aeb9cbb4d
 LABEL ai.omarchy.dsv41-flash-offload.commit="${DSV41_COMMIT}"
 RUN git init -q /opt/dsv41 && cd /opt/dsv41 \
  && git fetch -q --depth 1 "${DSV41_REPO}" "${DSV41_COMMIT}" \
