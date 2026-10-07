@@ -228,7 +228,7 @@ jobs:
               docker run --rm --network none --memory 1g --cpus 2 --entrypoint python3 \
                 -v "$PWD/dsv41-flash-offload/check_source.py:/check_source.py:ro" "$ref" /check_source.py "$commit"
               docker run --rm --network none --memory 1g --cpus 2 --workdir /opt/dsv41 --entrypoint python3 \
-                "$ref" -m unittest discover -s tests -p test_pack_verify.py
+                "$ref" -c "import unittest, sys; suite=unittest.defaultTestLoader.discover('tests', pattern='test_pack_verify.py'); assert suite.countTestCases() >= 9, 'pack integrity fixtures missing'; sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())"
               pass "DSV41 installed source hashes, patch receipt chain, CPU tier hook and Engram shared-library load"
               echo "- CPU source checks only; GPU launch, model acceptance and quality remain separate gates." >> "$GITHUB_STEP_SUMMARY"
               ;;
