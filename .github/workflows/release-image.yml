@@ -177,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        if: inputs.engine == 'dsv41' || inputs.engine == 'gateway'
+        if: inputs.engine == 'dsv41' || inputs.engine == 'gateway' || inputs.image == 'exl3xpu-trellis'
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
@@ -221,6 +221,12 @@ jobs:
             exl3xpu)
               docker run --rm --network none --entrypoint python3 "$ref" -c "import exl3xpu; from importlib.metadata import entry_points; assert any(e.name=='exl3xpu' for e in entry_points(group='vllm.general_plugins'))"
               docker run --rm --network none "$ref" --help
+              if [ "$IMAGE" = exl3xpu-trellis ]; then
+                commit=$(sed -n 's/^ARG TRELLIS_SERVE_COMMIT=//p' exl3xpu-trellis/Dockerfile)
+                timeout 120 docker run --rm --network none --memory 2g --cpus 2 --pids-limit 128 --entrypoint python3 \
+                  -v "$PWD/exl3xpu-trellis/check_core.py:/check_core.py:ro" "$ref" /check_core.py "$commit"
+                pass "trellis core source commit, imports and parser regression on the published vLLM XPU variant"
+              fi
               pass "EXL3 XPU plugin entry point and launcher parser; hardware inference remains separate"
               ;;
             dsv41)
