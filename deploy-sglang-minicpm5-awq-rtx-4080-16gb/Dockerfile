@@ -3,7 +3,7 @@
 # ENTRYPOINT fetches cyankiwi/MiniCPM5-2B-AWQ-INT4@bc59eebcb2e1 into /opt/models/MiniCPM5-2B-AWQ-INT4, writes .omp-ready, then delegates
 # to the base /opt/entrypoint.sh shim ("$@" = passed --docker-args OR the serve CMD below). Build-status only.
 FROM ghcr.io/0xsero/sglang@sha256:787461f889674cdd9339be2409a6e8b46ec2f5aac71669481c319f87c2beca13
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R12"
 LABEL ai.omarchy.model.repo="cyankiwi/MiniCPM5-2B-AWQ-INT4"
 LABEL ai.omarchy.model.revision="bc59eebcb2e12f5e1e714c57a4b6b7527f6cd845"

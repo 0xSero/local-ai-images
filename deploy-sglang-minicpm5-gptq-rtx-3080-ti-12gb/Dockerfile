@@ -4,7 +4,7 @@
 # (diagnostic SSH first, no fetch); unset -> blocking /opt/omp-acquire (fail-closed, rev-validated
 # .omp-ready marker) then the base /opt/entrypoint.sh shim + baked serve CMD. Build-status only.
 FROM ghcr.io/0xsero/sglang@sha256:787461f889674cdd9339be2409a6e8b46ec2f5aac71669481c319f87c2beca13
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R05"
 LABEL ai.omarchy.model.repo="openbmb/MiniCPM5-2B-GPTQ"
 LABEL ai.omarchy.model.revision="48d57c14fba6b1f86109e1a54fafb0848c163f04"

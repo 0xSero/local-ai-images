@@ -34,6 +34,15 @@ on:
         description: "smoke mode: sglang | vllm | tabby | llama | dsv41 (selects CPU checks)"
         required: false
         default: ""
+      namespace:
+        description: "smoke mode only: owner namespace of an existing image; new builds always use the repository owner"
+        required: false
+        default: repository-owner
+        type: choice
+        options:
+          - repository-owner
+          - 0xsero
+          - sybil-solutions
 permissions:
   contents: read
   packages: write
@@ -121,6 +130,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image owner
+        id: owner
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "namespace=${OWNER,,}" >> "$GITHUB_OUTPUT"
       - name: Build and push with SLSA provenance
         id: push
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
@@ -128,7 +142,7 @@ jobs:
           context: ./${{ inputs.image }}
           platforms: ${{ inputs.platform }}
           push: true
-          tags: ghcr.io/0xsero/${{ inputs.image }}:${{ inputs.tag }}
+          tags: ghcr.io/${{ steps.owner.outputs.namespace }}/${{ inputs.image }}:${{ inputs.tag }}
           provenance: mode=max
           sbom: ${{ inputs.sbom == 'true' }}
           # Shared-layer reuse across builds of the same base (apt layers,
@@ -138,13 +152,13 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
-          subject-name: ghcr.io/0xsero/${{ inputs.image }}
+          subject-name: ghcr.io/${{ steps.owner.outputs.namespace }}/${{ inputs.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
       - name: Record provenance
         run: |
           set -euo pipefail
-          out="ghcr.io/0xsero/${{ inputs.image }}@${{ steps.push.outputs.digest }}"
+          out="ghcr.io/${{ steps.owner.outputs.namespace }}/${{ inputs.image }}@${{ steps.push.outputs.digest }}"
           echo "IMAGE=$out"
           {
             echo "## ${{ inputs.image }}:${{ inputs.tag }}"
@@ -154,9 +168,11 @@ jobs:
             echo "- base pins:"
             grep -iE '^[[:space:]]*FROM[[:space:]]' "./${{ inputs.image }}/Dockerfile" \
               | sed -E 's/^/  - `/; s/[[:space:]]*$/`/'
-            echo "- verify: \`gh attestation verify oci://$out -o 0xSero\`"
+            echo "- verify: \`gh attestation verify oci://$out --repo ${{ github.repository }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
   smoke:
+    env:
+      NAMESPACE: ${{ inputs.namespace != 'repository-owner' && inputs.namespace || github.repository_owner }}
     if: inputs.smoke == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -171,7 +187,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${{ inputs.digest }}" || { echo "::error::smoke needs a digest input"; exit 1; }
-          ref="ghcr.io/0xsero/${{ inputs.image }}@${{ inputs.digest }}"
+          ref="ghcr.io/${NAMESPACE,,}/${{ inputs.image }}@${{ inputs.digest }}"
           docker logout ghcr.io || true   # force an anonymous pull of the public image
           docker pull --platform linux/amd64 "$ref"
           got=$(docker image inspect "$ref" --format '{{ index .RepoDigests 0 }}' | sed 's/.*@//')
@@ -190,7 +206,7 @@ jobs:
           ENGINE: ${{ inputs.engine }}
         run: |
           set -euo pipefail
-          ref="ghcr.io/0xsero/${IMAGE}@${DIGEST}"
+          ref="ghcr.io/${NAMESPACE,,}/${IMAGE}@${DIGEST}"
           e="${ENGINE}"
           pass(){ echo "- $1: PASS" >> "$GITHUB_STEP_SUMMARY"; }
           case "$e" in

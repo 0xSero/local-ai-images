@@ -3,7 +3,7 @@
 # ENTRYPOINT fetches ornith-ai/Ornith-1.5-9B@489cb97981b8 into /opt/models/Ornith-1.5-9B, then delegates to base shim.
 # Build-status only; runtime untested here.
 FROM ghcr.io/0xsero/vllm-openai@sha256:1de88ff218282ce71da7811f62ea527556648e1ad05dd36e5fc82d0f9ff07424
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R18"
 LABEL ai.omarchy.model.repo="ornith-ai/Ornith-1.5-9B"
 LABEL ai.omarchy.model.revision="489cb97981b8654bcfcf30ce1f94ed1b62e07b53"

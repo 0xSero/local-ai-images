@@ -3,7 +3,7 @@
 # ENTRYPOINT fetches turboderp/Qwen3.8-27B-exl3@e5e1f4b37c77 into /opt/models/Qwen3.8-27B-EXL3-SC2bpw-H3-V3, then launches tabby with the
 # baked config. Build-status only; runtime untested here.
 FROM ghcr.io/0xsero/tabbyapi-exl3-cu12@sha256:c0850ea09fcf8bb21a289ae0c5fe8ba29a1658a77257cf80a2308da3e4a3ec2c
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R04"
 LABEL ai.omarchy.model.repo="turboderp/Qwen3.8-27B-exl3"
 LABEL ai.omarchy.model.revision="e5e1f4b37c77641e465e24adf5f44d01bdd48de2"

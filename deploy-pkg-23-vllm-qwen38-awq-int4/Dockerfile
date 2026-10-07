@@ -3,7 +3,7 @@
 # argv + env are the landed recipe qwen38-awq-int4-rtx3090-vllm-tp1 (tool parser qwen3_xml is evidence-backed there). Build-status only.
 FROM ghcr.io/0xsero/vllm-openai@sha256:1de88ff218282ce71da7811f62ea527556648e1ad05dd36e5fc82d0f9ff07424
 ENV VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R29"
 LABEL ai.omarchy.package="PKG-23"
 LABEL ai.omarchy.model.repo="cyankiwi/Qwen3.8-27B-AWQ-INT4"

@@ -6,7 +6,7 @@
 FROM ghcr.io/0xsero/llamacpp-prism@sha256:d9efaf72a177156667879c795217f5e98a6041930ddb29778399edc1ef57b33c
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
-LABEL org.opencontainers.image.source="https://github.com/0xSero/local-ai-images"
+LABEL org.opencontainers.image.source="https://github.com/sybil-solutions/local-ai-images"
 LABEL ai.omarchy.row="R01"
 LABEL ai.omarchy.model.repo="prism-ml/Ternary-Bonsai-2-27B-gguf"
 LABEL ai.omarchy.model.revision="6ed5e12bf84b7a63069882c91dd9e9218647d17b"
