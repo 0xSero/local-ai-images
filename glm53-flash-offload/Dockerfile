@@ -6,12 +6,19 @@
 #                    C4 33.98 agg, KV 131,072; prefill exact (panel 1.0000 / KL 0), decode NOT exact (CPU tier: paired
 #                    KL 0.0053, top-1 0.977; fix in progress); host RAM ~218 GiB
 #   GLM53_MODE=exact run G066a: prefill 697 / 945, decode ~12.6, bit-exact with exllamav3; host RAM ~111 GiB
+#   GLM53_MODE=nvme  55 GB NVMe mode (N119 S3b2): routed experts from a packed 117.3 GB NVMe store mounted at /nvx
+#                    (O_DIRECT reads, pthread pool, no libaio) into a RAM tier sized from the container cap
+#                    (--memory 55g --memory-swap 55g), GPU expert cache, AVX2 CPU lane; prefill 583 / 812, decode
+#                    C1 14.85 / C2 15.62 / C4 16.27 agg, C1 at 32k 13.46; prefill exact, decode not exact (paired KL
+#                    0.0047, top-1 0.986)
+#   GLM53_MODE=nvme-exact  the same without the CPU lane (N119 S2a): prefill 563 / 805, decode ~8.3, bit-exact
+#   `IMAGE pack-store` / `IMAGE verify-store` build / re-check the store (CPU only; checkpoint at /models, store at /nvx).
 #
 # Base = the stack the numbers were measured on: lmsysorg/sglang v0.5.20 (CUDA 13.0, torch, Triton, nvcc; same digest
 # as ./sglang-exl3) + exllamav3 v1.5.1 (tag commit 958ec93) built from source for sm_86 (binaries also run on sm_89).
 # Baked in: the repo's routing stats, exllamav3 MoE tune cache, the exact Triton autotune pins (empty Triton cache, no
 # benchmarking), and pre-built torch extensions (expert cache, CPU tier host -mavx2 -mfma -mf16c + GPU split/combine,
-# fast split, fused hyper-connection kernels).
+# fast split, fused hyper-connection kernels, NVMe tier engines nv_tier + nv2).
 # The model is NOT in the image: mount the checkpoint at /models, or mount an empty writable dir there and the
 # entrypoint downloads turboderp/GLM-5.3-Flash-exl3 @ 332ab457 (branch 3.05bpw, 125.3 GB).
 #
@@ -48,8 +55,8 @@ RUN git clone https://github.com/turboderp-org/exllamav3 /opt/exllamav3-src \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG GLM53_REPO=https://github.com/0xSero/glm53-flash-offload
-ARG GLM53_COMMIT=fe97bcf846347d035859a0610cebbb707fa36caa
-LABEL ai.omarchy.glm53-flash-offload.commit="fe97bcf846347d035859a0610cebbb707fa36caa"
+ARG GLM53_COMMIT=92698604575f789ecc7a2340480413567e6d05c6
+LABEL ai.omarchy.glm53-flash-offload.commit="${GLM53_COMMIT}"
 RUN git init -q /opt/glm53 \
  && cd /opt/glm53 \
  && git fetch -q --depth 1 "${GLM53_REPO}" "${GLM53_COMMIT}" \
