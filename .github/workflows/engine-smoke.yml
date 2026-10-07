@@ -51,7 +51,7 @@ jobs:
             'set -e; command -v curl; command -v sha256sum
              deps=$(ldd /opt/llama/llama-server); printf "%s\n" "$deps"
              missing=$(printf "%s\n" "$deps" | awk "/=> not found/ {print \$1}")
-             test -z "$(printf "%s\n" "$missing" | sed "/^libcuda\.so\.1$/d; /^$/d")"
+             case "$missing" in ""|libcuda.so.1) ;; *) exit 1;; esac
              if [ -z "$missing" ]; then /opt/llama/llama-server --version
              else echo "CPU dependencies checked; binary loading requires real NVIDIA driver libraries and remains a separate host check."; fi' \
             | tee -a "$GITHUB_STEP_SUMMARY"
