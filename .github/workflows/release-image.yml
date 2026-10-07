@@ -227,6 +227,8 @@ jobs:
               commit=$(sed -n 's/^ARG DSV41_COMMIT=//p' dsv41-flash-offload/Dockerfile)
               docker run --rm --network none --memory 1g --cpus 2 --entrypoint python3 \
                 -v "$PWD/dsv41-flash-offload/check_source.py:/check_source.py:ro" "$ref" /check_source.py "$commit"
+              docker run --rm --network none --memory 1g --cpus 2 --workdir /opt/dsv41 --entrypoint python3 \
+                "$ref" -c "import unittest, sys; suite=unittest.defaultTestLoader.discover('tests', pattern='test_pack_verify.py'); assert suite.countTestCases() >= 9, 'pack integrity fixtures missing'; sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())"
               pass "DSV41 installed source hashes, patch receipt chain, CPU tier hook and Engram shared-library load"
               echo "- CPU source checks only; GPU launch, model acceptance and quality remain separate gates." >> "$GITHUB_STEP_SUMMARY"
               ;;
@@ -320,9 +322,14 @@ jobs:
               pass "TabbyAPI config schema validates baked /app/config.yml"
               echo "- tabby engine-resolved values: \`$(echo "$R" | grep RESOLVED)\`" >> "$GITHUB_STEP_SUMMARY" ;;
             llama)
-              docker run --rm --entrypoint sh "$ref" -c 'command -v curl && command -v sha256sum && command -v python3'
-              docker run --rm --entrypoint /opt/llama/llama-server "$ref" --version
-              pass "curl + sha256sum + python3 + llama-server present" ;;
+              docker run --rm --network none --entrypoint sh "$ref" -c 'set -e
+                command -v curl; command -v sha256sum; command -v python3
+                deps=$(ldd /opt/llama/llama-server); printf "%s\n" "$deps"
+                missing=$(printf "%s\n" "$deps" | awk "/=> not found/ {print \$1}")
+                case "$missing" in ""|libcuda.so.1) ;; *) exit 1;; esac
+                if [ -z "$missing" ]; then /opt/llama/llama-server --version
+                else echo "CPU dependencies checked; binary loading requires real NVIDIA driver libraries and remains a separate host check."; fi'
+              pass "fetch tools and CPU ELF dependencies; driver-dependent binary loading is a separate host gate" ;;
             proof)
               # Readiness-contract proof, parameterised from the image's OWN labels -> works for every
               # engine/model. HF_ENDPOINT=http://127.0.0.1:1 forces a deterministic fetch failure (no egress).

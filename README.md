@@ -8,6 +8,14 @@ attestation:
 
     gh attestation verify oci://ghcr.io/sybil-solutions/<image>@sha256:<digest> --repo sybil-solutions/local-ai-images
 
+The `llama` smoke mode checks fetch tools and ELF dependencies on CPU runners.
+Only `libcuda.so.1` may be unresolved there; any other missing dependency fails.
+Binary loading is a separate gate on an NVIDIA Container Toolkit host: run the
+exact digest with `--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=none
+-e NVIDIA_DRIVER_CAPABILITIES=compute,utility --entrypoint /opt/llama/llama-server`
+and `--version`. Require exit zero and version output. This exposes driver
+libraries with no GPU devices and does not qualify model serving.
+
 | Image | Base | Why it exists |
 |---|---|---|
 | `gateway` | `python:3.12-slim` by digest | the plugin's one endpoint: OpenAI chat passes through, Anthropic Messages and OpenAI Responses are translated to the engine's chat completions, streaming and tool calls included; enforces the share key when one is set. `python3 gateway/test.py` runs its tests against a fake engine. |
