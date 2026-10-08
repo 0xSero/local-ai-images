@@ -15,6 +15,9 @@
 #   `IMAGE pack-store` / `IMAGE verify-store` build / re-check the store (CPU only; checkpoint at /models, store at /nvx).
 #   NVMe modes pin their threads to the measured CPU layout when the container's CPU set holds it, else derive it from
 #   the CPU set; pack-store / verify-store / the server probe O_DIRECT on /nvx first (glm53-flash-offload PR #3).
+#   NVMe modes size from the cgroup cap: below 24 GiB a small-host budget applies (-rcs 1, margin 1.5 GiB, 128-slot
+#   prefill ring, 48 readers x 1 MiB), so --memory 16g runs (969-expert RAM tier, 14.4 GiB peak); refused only under
+#   15 GiB (glm53-flash-offload PR #5).
 #
 # Base = the stack the numbers were measured on: lmsysorg/sglang v0.5.20 (CUDA 13.0, torch, Triton, nvcc; same digest
 # as ./sglang-exl3) + exllamav3 v1.5.1 (tag commit 958ec93) built from source for sm_86 (binaries also run on sm_89).
@@ -57,7 +60,7 @@ RUN git clone https://github.com/turboderp-org/exllamav3 /opt/exllamav3-src \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG GLM53_REPO=https://github.com/sybil-solutions/glm53-flash-offload
-ARG GLM53_COMMIT=7f1ee89ad5c84798666a2024f477d36f2c2ab1b0
+ARG GLM53_COMMIT=3bdb50223950d3aea9b15eba18bd6a71615e5383
 LABEL ai.omarchy.glm53-flash-offload.commit="${GLM53_COMMIT}"
 RUN git init -q /opt/glm53 \
  && cd /opt/glm53 \
