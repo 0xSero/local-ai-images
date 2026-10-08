@@ -19,7 +19,7 @@
 #   prefill ring, 48 readers x 1 MiB), so --memory 16g runs (969-expert RAM tier, 14.4 GiB peak); refused only under
 #   15 GiB (glm53-flash-offload PR #5).
 #   AVX2 CPU kernels clamp the 16-byte trellis window to the 96-byte tile (out-of-bounds read -> SIGSEGV at a mapping end;
-#   bit-identical; glm53-flash-offload PR #7).
+#   bit-identical; glm53-flash-offload PR #7). usage.completion_tokens counts across max_rq_tokens requeues (PR #8).
 #
 # Base = the stack the numbers were measured on: lmsysorg/sglang v0.5.20 (CUDA 13.0, torch, Triton, nvcc; same digest
 # as ./sglang-exl3) + exllamav3 v1.5.1 (tag commit 958ec93) built from source for sm_86 (binaries also run on sm_89).
@@ -62,7 +62,7 @@ RUN git clone https://github.com/turboderp-org/exllamav3 /opt/exllamav3-src \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG GLM53_REPO=https://github.com/sybil-solutions/glm53-flash-offload
-ARG GLM53_COMMIT=4dafe6f190f5018fb4419ff50facd130ba902c2a
+ARG GLM53_COMMIT=7294f60e8e73dffff2cfce3db6b68f4d6ff06d31
 LABEL ai.omarchy.glm53-flash-offload.commit="${GLM53_COMMIT}"
 RUN git init -q /opt/glm53 \
  && cd /opt/glm53 \
