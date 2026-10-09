@@ -1,5 +1,5 @@
 # ghcr.io/0xsero/glm53-flash-offload: GLM-5.3-Flash EXL3 (3.05bpw, turboderp/GLM-5.3-Flash-exl3) on ONE 24 GB
-# RTX 3090 (sm_86) + host DDR4, OpenAI-compatible API on :30000. Serving code: github.com/0xSero/glm53-flash-offload
+# RTX 3090 (sm_86) + host DDR4, OpenAI-compatible API on :30000. Serving code: github.com/sybil-solutions/glm-flash-lite
 # at the pinned commit below (monkeypatches over stock exllamav3 1.5.1: pinned zero-copy home copy of all routed
 # experts, elastic CLOCK GPU expert cache + prefill staging, AVX2 CPU tier for cold decode misses).
 #   GLM53_MODE=fast  (default) campaign run G067: prefill 8k 710 / 32k 951 tok/s, decode C1 28.15 / C2 31.57 /
@@ -14,12 +14,12 @@
 #   GLM53_MODE=nvme-exact  the same without the CPU lane (N119 S2a): prefill 563 / 805, decode ~8.3, bit-exact
 #   `IMAGE pack-store` / `IMAGE verify-store` build / re-check the store (CPU only; checkpoint at /models, store at /nvx).
 #   NVMe modes pin their threads to the measured CPU layout when the container's CPU set holds it, else derive it from
-#   the CPU set; pack-store / verify-store / the server probe O_DIRECT on /nvx first (glm53-flash-offload PR #3).
+#   the CPU set; pack-store / verify-store / the server probe O_DIRECT on /nvx first (glm-flash-lite PR #3).
 #   NVMe modes size from the cgroup cap: below 24 GiB a small-host budget applies (-rcs 1, margin 1.5 GiB, 128-slot
 #   prefill ring, 48 readers x 1 MiB), so --memory 16g runs (969-expert RAM tier, 14.4 GiB peak); refused only under
-#   15 GiB (glm53-flash-offload PR #5).
+#   15 GiB (glm-flash-lite PR #5).
 #   AVX2 CPU kernels clamp the 16-byte trellis window to the 96-byte tile (out-of-bounds read -> SIGSEGV at a mapping end;
-#   bit-identical; glm53-flash-offload PR #7). usage.completion_tokens counts across max_rq_tokens requeues (PR #8).
+#   bit-identical; glm-flash-lite PR #7). usage.completion_tokens counts across max_rq_tokens requeues (PR #8).
 #   GLM53_MODE=nvme defaults on: N135 CPU-lane forward (PR #10) + N136 decode lookahead / fast nv_pub / side-stream
 #   prefetch guess / MLA block-table trim (PR #11), each settable to 0 (PR #12).
 #   GLM53_B70=1 (default off, nvme mode only): optional B70 expert tier; needs the companion image
@@ -66,7 +66,7 @@ RUN git clone https://github.com/turboderp-org/exllamav3 /opt/exllamav3-src \
  && rm -rf /opt/exllamav3-src
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
-ARG GLM53_REPO=https://github.com/sybil-solutions/glm53-flash-offload
+ARG GLM53_REPO=https://github.com/sybil-solutions/glm-flash-lite
 ARG GLM53_COMMIT=0fbc0c569772863f9ae02730c3a3549a2b3b25f6
 LABEL ai.omarchy.glm53-flash-offload.commit="${GLM53_COMMIT}"
 RUN git init -q /opt/glm53 \
