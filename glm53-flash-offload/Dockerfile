@@ -20,6 +20,8 @@
 #   15 GiB (glm53-flash-offload PR #5).
 #   AVX2 CPU kernels clamp the 16-byte trellis window to the 96-byte tile (out-of-bounds read -> SIGSEGV at a mapping end;
 #   bit-identical; glm53-flash-offload PR #7). usage.completion_tokens counts across max_rq_tokens requeues (PR #8).
+#   GLM53_MODE=nvme defaults on: N135 CPU-lane forward (PR #10) + N136 decode lookahead / fast nv_pub / side-stream
+#   prefetch guess / MLA block-table trim (PR #11), each settable to 0 (PR #12).
 #   GLM53_B70=1 (default off, nvme mode only): optional B70 expert tier; needs the companion image
 #   glm53-b70-expert-server on one Arc Pro B70 and a shared tmpfs dir at /run/local-ai/shared (PR #9, campaign N137:
 #   55 GiB decode C1 17.5 -> 26.5, C4 19.1 -> 33.5, decode KL 0.0034).
@@ -65,7 +67,7 @@ RUN git clone https://github.com/turboderp-org/exllamav3 /opt/exllamav3-src \
 
 # Serving code at the pinned commit; fail closed if the checkout is anything else.
 ARG GLM53_REPO=https://github.com/sybil-solutions/glm53-flash-offload
-ARG GLM53_COMMIT=afdf39062a3f8aa3497c5013b2993ac017f54822
+ARG GLM53_COMMIT=0fbc0c569772863f9ae02730c3a3549a2b3b25f6
 LABEL ai.omarchy.glm53-flash-offload.commit="${GLM53_COMMIT}"
 RUN git init -q /opt/glm53 \
  && cd /opt/glm53 \
