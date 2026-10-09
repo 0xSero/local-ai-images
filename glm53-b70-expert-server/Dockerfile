@@ -1,7 +1,7 @@
 # ghcr.io/sybil-solutions/glm53-b70-expert-server: the B70 expert server for GLM-5.3-Flash's optional B70 expert tier
 # (glm53-flash-offload GLM53_B70=1). One Intel Arc Pro B70 32 GB holds 3,000 routed experts (28.4 GB) next to the RTX
 # 3090 engine (ghcr.io/sybil-solutions/glm53-flash-offload, GLM53_MODE=nvme) in the same machine. Serving code:
-# github.com/sybil-solutions/glm53-flash-offload b70tier/ at the pinned commit below.
+# github.com/sybil-solutions/glm-flash-lite b70tier/ at the pinned commit below.
 #   Started FIRST. It creates the ring /run/local-ai/shared/b70.ring (GLM53_B70_RING) in a host tmpfs dir that both
 #   containers mount. The engine attaches at warm-up and sends the expert keys. The server reads them from the packed
 #   NVMe store at /nvx (O_DIRECT, the engine's store, read-only), then computes the B70 picks of every decode MoE layer
@@ -24,7 +24,7 @@ LABEL ai.omarchy.role="companion"
 LABEL ai.omarchy.model.repo="turboderp/GLM-5.3-Flash-exl3"
 LABEL ai.omarchy.model.revision="332ab457b709b7ba30dd9a448be5de03b80a7ac9"
 
-ARG GLM53_REPO=https://github.com/sybil-solutions/glm53-flash-offload
+ARG GLM53_REPO=https://github.com/sybil-solutions/glm-flash-lite
 ARG GLM53_COMMIT=afdf39062a3f8aa3497c5013b2993ac017f54822
 LABEL ai.omarchy.glm53-flash-offload.commit="${GLM53_COMMIT}"
 
